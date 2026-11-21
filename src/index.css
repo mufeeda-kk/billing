@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body {
+    @apply h-full bg-slate-100 text-slate-900;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* Touch-optimized button states */
+button:active {
+  transform: scale(0.98);
+  transition: transform 0.05s ease-in-out;
+}
+
+/* Custom scrollbars for clean mobile appearance */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* =========================================================================
+   THERMAL RECEIPT PRINT STYLES
+   Ensures clean output on 58mm / 80mm thermal printers as well as standard A4
+   ========================================================================= */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #root {
+    display: none !important;
+  }
+  .print-receipt-container,
+  .print-receipt-container * {
+    visibility: visible;
+  }
+  .print-receipt-container {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  @page {
+    size: auto;
+    margin: 2mm;
+  }
+}
