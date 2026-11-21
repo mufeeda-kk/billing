@@ -44,6 +44,7 @@ export interface Product {
   selling_price: number;
   image_url?: string;
   is_active: boolean;
+  is_archived?: boolean;
   created_at?: string;
   updated_at?: string;
   variants?: ProductVariant[];
@@ -100,6 +101,8 @@ export interface Sale {
   payment_status: PaymentStatus;
   status: SaleStatus;
   cancellation_reason?: string;
+  cancelled_at?: string;
+  cancelled_by?: string;
   notes?: string;
   created_by: string;
   created_at: string;

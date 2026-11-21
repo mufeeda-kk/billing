@@ -32,9 +32,9 @@ export const BillingPage: React.FC = () => {
     return ['All', ...list];
   }, [products]);
 
-  // Filter products by search and category
+  // Filter products by search and category (strictly active & non-archived only)
   const filteredProducts = useMemo(() => {
-    let result = products;
+    let result = products.filter(p => p.is_active && !p.is_archived);
     if (selectedCategory !== 'All') {
       result = result.filter(p => p.category_name.toLowerCase() === selectedCategory.toLowerCase());
     }

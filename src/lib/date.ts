@@ -60,13 +60,23 @@ export function formatCurrency(amount: number): string {
  * Strict 7-Day Exchange Window Validator
  * Exchange is allowed strictly within 7 days of the original bill creation.
  */
-export function checkExchangeEligibility(billDateStr: string | Date): {
+export function checkExchangeEligibility(billDateStr: string | Date, isCancelled = false): {
   isEligible: boolean;
   daysPassed: number;
   daysRemaining: number;
   reason?: string;
   badgeColor: string;
 } {
+  if (isCancelled) {
+    return {
+      isEligible: false,
+      daysPassed: 0,
+      daysRemaining: 0,
+      reason: 'This bill is cancelled. Exchange cannot be processed.',
+      badgeColor: 'bg-rose-100 text-rose-800'
+    };
+  }
+
   const billDate = typeof billDateStr === 'string' ? new Date(billDateStr) : billDateStr;
   const now = new Date();
 

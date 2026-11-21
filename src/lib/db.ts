@@ -254,15 +254,18 @@ if (storeChannel) {
 
 export const db = {
   // PRODUCTS & VARIANTS
-  async getProducts(search?: string, category?: string): Promise<Product[]> {
+  async getProducts(search?: string, category?: string, includeArchived = false): Promise<Product[]> {
     const supabase = getSupabase();
     if (supabase && isSupabaseConfigured()) {
       try {
         let query = supabase
           .from('products')
           .select('*, variants:product_variants(*)')
-          .eq('is_active', true)
           .order('name');
+
+        if (!includeArchived) {
+          query = query.eq('is_active', true);
+        }
 
         if (category && category !== 'All') {
           query = query.eq('category_name', category);
@@ -281,7 +284,10 @@ export const db = {
     }
 
     // Local fallback
-    let items = [...localProducts].filter(p => p.is_active);
+    let items = [...localProducts];
+    if (!includeArchived) {
+      items = items.filter(p => p.is_active && !p.is_archived);
+    }
     if (category && category !== 'All') {
       items = items.filter(p => p.category_name.toLowerCase() === category.toLowerCase());
     }
@@ -300,23 +306,56 @@ export const db = {
     }));
   },
 
-  async saveProduct(productData: Partial<Product>, variantsData: Partial<ProductVariant>[], staffName: string): Promise<Product> {
+  async saveProduct(
+    productData: Partial<Product>, 
+    variantsData: Partial<ProductVariant>[], 
+    staffName: string,
+    stockChangeReason?: string
+  ): Promise<Product> {
+    const id = productData.id || `prod-${Date.now()}`;
+    const existingProduct = localProducts.find(p => p.id === id);
+    const isNew = !existingProduct;
+
+    // Audit and record stock adjustments if any variant stock was edited
+    if (!isNew && existingProduct) {
+      for (const v of variantsData) {
+        if (v.id) {
+          const oldVar = existingProduct.variants?.find(ov => ov.id === v.id);
+          if (oldVar && v.stock_quantity !== undefined && Number(v.stock_quantity) !== oldVar.stock_quantity) {
+            const oldStock = oldVar.stock_quantity;
+            const newStock = Math.max(0, Number(v.stock_quantity));
+            const diff = newStock - oldStock;
+            const reason = stockChangeReason || 'Stock modified during product edit';
+
+            await this.logActivity(
+              'STOCK_ADJUSTED',
+              `Adjusted stock of ${productData.name || existingProduct.name} (${v.size || oldVar.size}/${v.color || oldVar.color}) from ${oldStock} to ${newStock} (${diff > 0 ? '+' : ''}${diff}). Reason: ${reason}`,
+              'stock',
+              v.id,
+              staffName
+            );
+          }
+        }
+      }
+    }
+
     const supabase = getSupabase();
     if (supabase && isSupabaseConfigured()) {
       try {
         let prodId = productData.id;
         if (prodId) {
           // Update
-          const { error } = await supabase.from('products').update({
+          await supabase.from('products').update({
             name: productData.name,
             sku: productData.sku,
             category_name: productData.category_name,
             brand: productData.brand,
             purchase_price: productData.purchase_price,
             selling_price: productData.selling_price,
+            is_active: productData.is_active ?? true,
+            is_archived: productData.is_archived ?? false,
             updated_at: new Date().toISOString()
           }).eq('id', prodId);
-          if (error) throw error;
         } else {
           // Insert
           const { data, error } = await supabase.from('products').insert({
@@ -326,13 +365,13 @@ export const db = {
             brand: productData.brand || 'VINTAGE',
             purchase_price: productData.purchase_price || 0,
             selling_price: productData.selling_price || 0,
-            is_active: true
+            is_active: productData.is_active ?? true,
+            is_archived: false
           }).select().single();
-          if (error) throw error;
-          prodId = data.id;
+          if (!error && data) prodId = data.id;
         }
 
-        // Save variants
+        // Save variants in Supabase
         for (const v of variantsData) {
           if (v.id) {
             await supabase.from('product_variants').update({
@@ -359,14 +398,13 @@ export const db = {
     }
 
     // Local update
-    const id = productData.id || `prod-${Date.now()}`;
     const variants: ProductVariant[] = variantsData.map((v, idx) => ({
       id: v.id || `var-${id}-${idx}-${Date.now()}`,
       product_id: id,
       variant_sku: v.variant_sku || `${productData.sku || 'SKU'}-${v.size}-${v.color}`.toUpperCase().replace(/\s+/g, ''),
       size: v.size || 'M',
       color: v.color || 'Standard',
-      stock_quantity: Number(v.stock_quantity) || 0,
+      stock_quantity: Math.max(0, Number(v.stock_quantity) || 0),
       low_stock_threshold: Number(v.low_stock_threshold) || 2
     }));
 
@@ -378,7 +416,8 @@ export const db = {
       brand: productData.brand || 'VINTAGE',
       purchase_price: Number(productData.purchase_price) || 0,
       selling_price: Number(productData.selling_price) || 0,
-      is_active: true,
+      is_active: productData.is_active ?? true,
+      is_archived: productData.is_archived ?? false,
       variants,
       total_stock: variants.reduce((acc, v) => acc + v.stock_quantity, 0)
     };
@@ -393,7 +432,7 @@ export const db = {
 
     await this.logActivity(
       existingIdx >= 0 ? 'PRODUCT_EDITED' : 'PRODUCT_ADDED',
-      `${existingIdx >= 0 ? 'Updated' : 'Added'} product "${newProd.name}" (${newProd.sku})`,
+      `${existingIdx >= 0 ? 'Updated' : 'Added'} product "${newProd.name}" (${newProd.sku})${newProd.is_active ? '' : ' [Inactive/Archived]'}`,
       'product',
       id,
       staffName
@@ -401,6 +440,70 @@ export const db = {
 
     notifyChange('PRODUCT_UPDATE', newProd);
     return newProd;
+  },
+
+  async deleteOrArchiveProduct(productId: string, staffName: string): Promise<{ action: 'deleted' | 'archived'; message: string }> {
+    const prod = localProducts.find(p => p.id === productId);
+    if (!prod) {
+      throw new Error('Product not found');
+    }
+
+    // Check if product is referenced in sales, purchases, or exchanges
+    const hasSales = localSales.some(s => s.items?.some(i => i.product_id === productId));
+    const hasPurchases = localPurchases.some(p => p.items?.some(i => i.product_id === productId));
+    const hasExchanges = localExchanges.some(e => e.items?.some(i => i.product_id === productId));
+    const hasHistory = hasSales || hasPurchases || hasExchanges;
+
+    const supabase = getSupabase();
+    if (supabase && isSupabaseConfigured()) {
+      try {
+        await supabase.rpc('delete_or_archive_product', {
+          p_product_id: productId,
+          p_performed_by: staffName
+        });
+      } catch (err) {
+        console.warn('Supabase delete_or_archive_product error:', err);
+      }
+    }
+
+    if (hasHistory) {
+      // Safely archive / soft-delete
+      prod.is_active = false;
+      prod.is_archived = true;
+      saveStored(STORAGE_KEYS.PRODUCTS, localProducts);
+
+      await this.logActivity(
+        'PRODUCT_ARCHIVED',
+        `Archived product "${prod.name}" (${prod.sku}) because it has sales/purchase transaction history.`,
+        'product',
+        productId,
+        staffName
+      );
+
+      notifyChange('PRODUCT_UPDATE', prod);
+      return {
+        action: 'archived',
+        message: `Product "${prod.name}" has existing bill/stock history and was safely archived. It will no longer appear in new billing, but all past bills remain preserved.`
+      };
+    } else {
+      // Permanently delete unused product
+      localProducts = localProducts.filter(p => p.id !== productId);
+      saveStored(STORAGE_KEYS.PRODUCTS, localProducts);
+
+      await this.logActivity(
+        'PRODUCT_DELETED',
+        `Permanently deleted unused product "${prod.name}" (${prod.sku}).`,
+        'product',
+        productId,
+        staffName
+      );
+
+      notifyChange('PRODUCT_UPDATE', { id: productId, deleted: true });
+      return {
+        action: 'deleted',
+        message: `Product "${prod.name}" was permanently deleted.`
+      };
+    }
   },
 
   async adjustVariantStock(variantId: string, newStock: number, reason: string, staffName: string): Promise<void> {
@@ -698,6 +801,280 @@ export const db = {
     return newSale;
   },
 
+  // ATOMIC BILL CANCELLATION (Restores stock safely & prevents double cancellation)
+  async cancelSale(saleId: string, reason: string, staffName: string): Promise<Sale> {
+    const sale = localSales.find(s => s.id === saleId);
+    if (!sale) {
+      throw new Error('Bill not found');
+    }
+
+    // Concurrency Check: Prevent double cancellation
+    if (sale.status === 'cancelled') {
+      throw new Error(`Bill #${sale.bill_number} is already cancelled. Duplicate cancellation blocked.`);
+    }
+
+    if (sale.status === 'exchanged') {
+      throw new Error(`Cannot cancel Bill #${sale.bill_number} because items have already been exchanged.`);
+    }
+
+    if (!reason || !reason.trim()) {
+      throw new Error('A cancellation reason is required.');
+    }
+
+    const supabase = getSupabase();
+    if (supabase && isSupabaseConfigured()) {
+      try {
+        const { error } = await supabase.rpc('cancel_sale_transaction', {
+          p_sale_id: saleId,
+          p_reason: reason.trim(),
+          p_cancelled_by: staffName
+        });
+        if (error) {
+          console.warn('Supabase cancel_sale_transaction RPC error:', error.message);
+        }
+      } catch (err) {
+        console.warn('Supabase cancel RPC failed, continuing locally:', err);
+      }
+    }
+
+    // Atomically restore stock for sold items
+    for (const item of (sale.items || [])) {
+      const restoreQty = item.quantity - (item.returned_quantity || 0);
+      if (restoreQty > 0) {
+        for (const p of localProducts) {
+          const v = p.variants?.find(v => v.id === item.variant_id);
+          if (v) {
+            v.stock_quantity += restoreQty;
+            break;
+          }
+        }
+      }
+    }
+    saveStored(STORAGE_KEYS.PRODUCTS, localProducts);
+
+    // Update sale status
+    sale.status = 'cancelled';
+    sale.cancellation_reason = reason.trim();
+    sale.cancelled_by = staffName;
+    sale.cancelled_at = new Date().toISOString();
+    sale.updated_at = new Date().toISOString();
+    saveStored(STORAGE_KEYS.SALES, localSales);
+
+    // If customer phone exists, adjust customer totals
+    if (sale.customer_phone) {
+      const cust = localCustomers.find(c => c.phone === sale.customer_phone);
+      if (cust) {
+        cust.total_purchases = Math.max(0, cust.total_purchases - sale.grand_total);
+        cust.total_bills = Math.max(0, cust.total_bills - 1);
+        saveStored(STORAGE_KEYS.CUSTOMERS, localCustomers);
+      }
+    }
+
+    // Activity log
+    await this.logActivity(
+      'BILL_CANCELLED',
+      `Cancelled Bill #${sale.bill_number}. Reason: ${reason.trim()}`,
+      'sales',
+      saleId,
+      staffName,
+      { bill_number: sale.bill_number, reason: reason.trim(), grand_total: sale.grand_total }
+    );
+
+    // Notify all devices & tabs
+    notifyChange('BILL_CANCELLED', sale);
+    notifyChange('STOCK_UPDATE', { reason: 'Bill cancelled' });
+
+    return sale;
+  },
+
+  // ATOMIC BILL EDIT (With differential stock adjustments & validation)
+  async editSale(saleId: string, updatedData: {
+    customer_name?: string;
+    customer_phone?: string;
+    subtotal: number;
+    discount_type: any;
+    discount_value: number;
+    discount_amount: number;
+    grand_total: number;
+    paid_amount: number;
+    payment_method: any;
+    notes?: string;
+    edit_reason?: string;
+    items: Array<{
+      id?: string;
+      product_id: string;
+      variant_id: string;
+      product_name: string;
+      size: string;
+      color: string;
+      quantity: number;
+      unit_price: number;
+      discount_amount?: number;
+      subtotal: number;
+      purchase_price?: number;
+    }>;
+  }, staffName: string): Promise<Sale> {
+    const sale = localSales.find(s => s.id === saleId);
+    if (!sale) {
+      throw new Error('Bill not found');
+    }
+
+    if (sale.status === 'cancelled') {
+      throw new Error('Cannot edit a cancelled bill.');
+    }
+
+    // 1. Calculate stock differences for all items
+    const oldItemsMap = new Map<string, number>();
+    (sale.items || []).forEach(i => {
+      oldItemsMap.set(i.variant_id, (oldItemsMap.get(i.variant_id) || 0) + i.quantity);
+    });
+
+    const newItemsMap = new Map<string, number>();
+    updatedData.items.forEach(i => {
+      newItemsMap.set(i.variant_id, (newItemsMap.get(i.variant_id) || 0) + i.quantity);
+    });
+
+    // Check stock availability for any items whose quantity increased
+    for (const [variantId, newQty] of newItemsMap.entries()) {
+      const oldQty = oldItemsMap.get(variantId) || 0;
+      const delta = newQty - oldQty; // >0 means more items sold
+
+      if (delta > 0) {
+        let currentStock = 0;
+        let found = false;
+        let vName = '';
+        for (const p of localProducts) {
+          const v = p.variants?.find(v => v.id === variantId);
+          if (v) {
+            found = true;
+            currentStock = v.stock_quantity;
+            vName = `${p.name} (${v.size}/${v.color})`;
+            break;
+          }
+        }
+        if (!found) throw new Error('Product variant not found');
+        if (currentStock < delta) {
+          throw new Error(`Insufficient stock for ${vName}. Available: ${currentStock}, Additional needed: ${delta}`);
+        }
+      }
+    }
+
+    // Supabase RPC if configured
+    const supabase = getSupabase();
+    if (supabase && isSupabaseConfigured()) {
+      try {
+        await supabase.rpc('edit_sale_transaction', {
+          p_sale_id: saleId,
+          p_customer_name: updatedData.customer_name || null,
+          p_customer_phone: updatedData.customer_phone || null,
+          p_subtotal: updatedData.subtotal,
+          p_discount_type: updatedData.discount_type,
+          p_discount_value: updatedData.discount_value,
+          p_discount_amount: updatedData.discount_amount,
+          p_grand_total: updatedData.grand_total,
+          p_paid_amount: updatedData.paid_amount,
+          p_payment_method: updatedData.payment_method,
+          p_notes: updatedData.notes || null,
+          p_edited_by: staffName,
+          p_edit_reason: updatedData.edit_reason || 'Bill details edited',
+          p_items: updatedData.items
+        });
+      } catch (err) {
+        console.warn('Supabase edit_sale_transaction RPC error:', err);
+      }
+    }
+
+    // Apply differential stock updates in local storage
+    for (const [variantId, newQty] of newItemsMap.entries()) {
+      const oldQty = oldItemsMap.get(variantId) || 0;
+      const delta = newQty - oldQty;
+      if (delta !== 0) {
+        for (const p of localProducts) {
+          const v = p.variants?.find(v => v.id === variantId);
+          if (v) {
+            v.stock_quantity = Math.max(0, v.stock_quantity - delta);
+            break;
+          }
+        }
+      }
+    }
+
+    // Items completely removed from bill: restore their full quantity to stock
+    for (const [variantId, oldQty] of oldItemsMap.entries()) {
+      if (!newItemsMap.has(variantId)) {
+        for (const p of localProducts) {
+          const v = p.variants?.find(v => v.id === variantId);
+          if (v) {
+            v.stock_quantity += oldQty;
+            break;
+          }
+        }
+      }
+    }
+    saveStored(STORAGE_KEYS.PRODUCTS, localProducts);
+
+    // Update Sale items
+    const updatedSaleItems = updatedData.items.map((item, idx) => ({
+      id: item.id || `si-${saleId}-${idx}-${Date.now()}`,
+      sale_id: saleId,
+      product_id: item.product_id,
+      variant_id: item.variant_id,
+      product_name: item.product_name,
+      size: item.size,
+      color: item.color,
+      quantity: item.quantity,
+      unit_price: item.unit_price,
+      discount_amount: item.discount_amount || 0,
+      subtotal: item.subtotal,
+      purchase_price: item.purchase_price || 0,
+      returned_quantity: 0
+    }));
+
+    const oldTotal = sale.grand_total;
+    const balanceAmount = Math.max(0, updatedData.grand_total - updatedData.paid_amount);
+
+    sale.customer_name = updatedData.customer_name?.trim() || undefined;
+    sale.customer_phone = updatedData.customer_phone?.trim() || undefined;
+    sale.subtotal = updatedData.subtotal;
+    sale.discount_type = updatedData.discount_type;
+    sale.discount_value = updatedData.discount_value;
+    sale.discount_amount = updatedData.discount_amount;
+    sale.grand_total = updatedData.grand_total;
+    sale.paid_amount = updatedData.paid_amount;
+    sale.balance_amount = balanceAmount;
+    sale.payment_method = updatedData.payment_method;
+    sale.payment_status = balanceAmount === 0 ? 'paid' : (updatedData.paid_amount > 0 ? 'partial' : 'unpaid');
+    sale.notes = updatedData.notes;
+    sale.items = updatedSaleItems;
+    sale.updated_at = new Date().toISOString();
+    saveStored(STORAGE_KEYS.SALES, localSales);
+
+    // Adjust customer total if changed
+    if (sale.customer_phone) {
+      const cust = localCustomers.find(c => c.phone === sale.customer_phone);
+      if (cust) {
+        cust.total_purchases += (updatedData.grand_total - oldTotal);
+        if (sale.customer_name) cust.name = sale.customer_name;
+        saveStored(STORAGE_KEYS.CUSTOMERS, localCustomers);
+      }
+    }
+
+    // Activity log
+    await this.logActivity(
+      'BILL_EDITED',
+      `Edited Bill #${sale.bill_number}. Reason: ${updatedData.edit_reason || 'Bill updated'} (Total: ₹${oldTotal} -> ₹${updatedData.grand_total})`,
+      'sales',
+      saleId,
+      staffName,
+      { bill_number: sale.bill_number, old_total: oldTotal, new_total: updatedData.grand_total }
+    );
+
+    notifyChange('BILL_UPDATED', sale);
+    notifyChange('STOCK_UPDATE', { reason: 'Bill edited' });
+
+    return sale;
+  },
+
   // ATOMIC 7-DAY CLOTHING EXCHANGE
   async processExchange(params: {
     original_sale_id: string;
@@ -730,8 +1107,12 @@ export const db = {
       throw new Error('Original bill not found');
     }
 
+    if (sale.status === 'cancelled') {
+      throw new Error(`Bill #${sale.bill_number} is cancelled. Cancelled bills cannot be exchanged.`);
+    }
+
     // STRICT 7-DAY EXCHANGE RULE ENFORCEMENT
-    const eligibility = checkExchangeEligibility(sale.created_at);
+    const eligibility = checkExchangeEligibility(sale.created_at, false);
     if (!eligibility.isEligible) {
       throw new Error(eligibility.reason || 'Exchange is strictly allowed within 7 days of original bill date.');
     }

@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Product, ProductVariant } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useStore } from '../../context/StoreContext';
 import { db } from '../../lib/db';
-import { X, Plus, Trash2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { X, Plus, Trash2, CheckCircle2, AlertCircle, ToggleLeft, ToggleRight, Sliders } from 'lucide-react';
 
 interface ProductFormModalProps {
   product?: Product | null;
@@ -28,6 +28,17 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   const [brand, setBrand] = useState(product?.brand || 'VINTAGE');
   const [sellingPrice, setSellingPrice] = useState(product?.selling_price ? String(product.selling_price) : '');
   const [purchasePrice, setPurchasePrice] = useState(product?.purchase_price ? String(product.purchase_price) : '');
+  const [isActive, setIsActive] = useState<boolean>(product ? product.is_active : true);
+  const [stockChangeReason, setStockChangeReason] = useState('Stock adjusted during product edit');
+
+  // Initial copy of variants to detect stock changes
+  const initialVariantsMap = useMemo(() => {
+    const map = new Map<string, number>();
+    (product?.variants || []).forEach(v => {
+      map.set(v.id, v.stock_quantity);
+    });
+    return map;
+  }, [product]);
 
   // Variants matrix state
   const [variants, setVariants] = useState<Array<Partial<ProductVariant>>>(
@@ -41,6 +52,16 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Check if any variant's stock quantity changed from original
+  const hasStockChanges = useMemo(() => {
+    if (!product) return false;
+    return variants.some(v => {
+      if (!v.id) return (v.stock_quantity || 0) > 0;
+      const initialStock = initialVariantsMap.get(v.id);
+      return initialStock !== undefined && Number(v.stock_quantity) !== initialStock;
+    });
+  }, [variants, initialVariantsMap, product]);
 
   const handleAddVariantRow = () => {
     setVariants(prev => [
@@ -86,13 +107,15 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
           category_name: categoryName,
           brand: brand.trim(),
           selling_price: sp,
-          purchase_price: pp
+          purchase_price: pp,
+          is_active: isActive
         },
         variants,
-        currentUser.full_name
+        currentUser.full_name,
+        hasStockChanges ? stockChangeReason : undefined
       );
 
-      showToast(product ? 'Product updated' : 'Product added successfully', 'success');
+      showToast(product ? 'Product updated successfully' : 'Product added successfully', 'success');
       onSuccess();
       onClose();
     } catch (err: any) {
@@ -124,6 +147,27 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
               <span>{errorMsg}</span>
             </div>
           )}
+
+          {/* Active Status Switch */}
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
+            <div>
+              <div className="font-bold text-slate-900">Product Status</div>
+              <div className="text-[11px] text-slate-500">
+                {isActive ? 'Active (available for billing)' : 'Inactive / Hidden from new bills'}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsActive(!isActive)}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg font-bold text-xs transition ${
+                isActive 
+                  ? 'bg-emerald-600 text-white shadow-xs' 
+                  : 'bg-slate-300 text-slate-700'
+              }`}
+            >
+              <span>{isActive ? 'ACTIVE' : 'INACTIVE'}</span>
+            </button>
+          </div>
 
           {/* Basic Fields */}
           <div className="space-y-3">
@@ -204,14 +248,14 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
             </div>
           </div>
 
-          {/* Clothing Variants Matrix (Size & Color Stock) */}
+          {/* Clothing Variants Matrix (Size, Color, Stock, Low Stock Threshold) */}
           <div className="pt-2 border-t border-slate-200">
             <div className="flex items-center justify-between mb-2">
               <div>
                 <h4 className="font-bold text-slate-900 uppercase tracking-wider text-[11px]">
                   Clothing Stock Variants ({variants.length})
                 </h4>
-                <p className="text-[10px] text-slate-500">Each size & color is tracked independently</p>
+                <p className="text-[10px] text-slate-500">Each size & color has tracked stock & low threshold</p>
               </div>
               <button
                 type="button"
@@ -225,50 +269,82 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
 
             <div className="space-y-2 max-h-56 overflow-y-auto">
               {variants.map((v, idx) => (
-                <div key={idx} className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center space-x-2">
-                  <div className="w-20">
-                    <label className="text-[10px] font-bold text-slate-500 block">Size</label>
-                    <input
-                      type="text"
-                      value={v.size || ''}
-                      onChange={e => updateVariant(idx, 'size', e.target.value)}
-                      placeholder="M, L, 32"
-                      className="w-full p-1.5 border border-slate-300 rounded-lg font-bold text-xs bg-white text-center"
-                    />
+                <div key={idx} className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                  <div className="flex items-center space-x-2">
+                    <div className="w-24">
+                      <label className="text-[10px] font-bold text-slate-500 block">Size</label>
+                      <input
+                        type="text"
+                        value={v.size || ''}
+                        onChange={e => updateVariant(idx, 'size', e.target.value)}
+                        placeholder="M, L, 32"
+                        className="w-full p-1.5 border border-slate-300 rounded-lg font-bold text-xs bg-white text-center"
+                      />
+                    </div>
+
+                    <div className="flex-1">
+                      <label className="text-[10px] font-bold text-slate-500 block">Color</label>
+                      <input
+                        type="text"
+                        value={v.color || ''}
+                        onChange={e => updateVariant(idx, 'color', e.target.value)}
+                        placeholder="Black, White, etc."
+                        className="w-full p-1.5 border border-slate-300 rounded-lg text-xs bg-white"
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveVariantRow(idx)}
+                      className="p-1.5 text-slate-400 hover:text-rose-600 mt-3"
+                      title="Remove variant"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
 
-                  <div className="flex-1">
-                    <label className="text-[10px] font-bold text-slate-500 block">Color</label>
-                    <input
-                      type="text"
-                      value={v.color || ''}
-                      onChange={e => updateVariant(idx, 'color', e.target.value)}
-                      placeholder="Black, White, etc."
-                      className="w-full p-1.5 border border-slate-300 rounded-lg text-xs bg-white"
-                    />
+                  <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200/60">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block">Current Stock (Qty)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={v.stock_quantity ?? 0}
+                        onChange={e => updateVariant(idx, 'stock_quantity', Math.max(0, parseInt(e.target.value, 10) || 0))}
+                        className="w-full p-1.5 border border-slate-300 rounded-lg font-bold font-mono text-xs bg-white text-center"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 block">Low Stock Alert At</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={v.low_stock_threshold ?? 2}
+                        onChange={e => updateVariant(idx, 'low_stock_threshold', Math.max(1, parseInt(e.target.value, 10) || 2))}
+                        className="w-full p-1.5 border border-slate-300 rounded-lg font-mono text-xs bg-white text-center"
+                      />
+                    </div>
                   </div>
-
-                  <div className="w-20">
-                    <label className="text-[10px] font-bold text-slate-500 block">Stock Qty</label>
-                    <input
-                      type="number"
-                      min="0"
-                      value={v.stock_quantity ?? 0}
-                      onChange={e => updateVariant(idx, 'stock_quantity', parseInt(e.target.value, 10) || 0)}
-                      className="w-full p-1.5 border border-slate-300 rounded-lg font-bold font-mono text-xs bg-white text-center"
-                    />
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveVariantRow(idx)}
-                    className="p-1.5 text-slate-400 hover:text-rose-600 mt-3"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
                 </div>
               ))}
             </div>
+
+            {/* If variant stock was changed, ask for reason */}
+            {hasStockChanges && (
+              <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-1">
+                <label className="font-bold text-amber-900 block text-xs">
+                  Stock Adjustment Reason (Audit Record) *
+                </label>
+                <input
+                  type="text"
+                  value={stockChangeReason}
+                  onChange={e => setStockChangeReason(e.target.value)}
+                  placeholder="e.g. Physical store recount, Damaged items removed"
+                  className="w-full p-2 border border-amber-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-amber-500 font-medium"
+                  required
+                />
+              </div>
+            )}
           </div>
 
           <div className="pt-2">

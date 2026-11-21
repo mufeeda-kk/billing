@@ -5,6 +5,8 @@ import { openWhatsAppShare } from '../../lib/whatsapp';
 import { generateAndDownloadBillPdf } from '../../lib/pdf';
 import { checkExchangeEligibility, formatCurrency, formatDateTimeIST } from '../../lib/date';
 import { ExchangeModal } from '../exchange/ExchangeModal';
+import { CancelBillModal } from './CancelBillModal';
+import { EditBillModal } from './EditBillModal';
 import { 
   X, 
   Printer, 
@@ -16,7 +18,10 @@ import {
   User, 
   Phone, 
   ShieldCheck, 
-  ShieldAlert 
+  ShieldAlert,
+  Ban,
+  Edit3,
+  AlertTriangle
 } from 'lucide-react';
 
 interface BillDetailsModalProps {
@@ -26,19 +31,23 @@ interface BillDetailsModalProps {
 }
 
 export const BillDetailsModal: React.FC<BillDetailsModalProps> = ({
-  sale,
+  sale: initialSale,
   onClose,
   onRefreshHistory
 }) => {
+  const [currentSale, setCurrentSale] = useState<Sale>(initialSale);
   const [showExchangeModal, setShowExchangeModal] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
-  const eligibility = checkExchangeEligibility(sale.created_at);
+  const isCancelled = currentSale.status === 'cancelled';
+  const eligibility = checkExchangeEligibility(currentSale.created_at, isCancelled);
 
   const handlePdf = async () => {
     setIsDownloadingPdf(true);
     try {
-      await generateAndDownloadBillPdf(sale);
+      await generateAndDownloadBillPdf(currentSale);
     } finally {
       setIsDownloadingPdf(false);
     }
@@ -55,23 +64,25 @@ export const BillDetailsModal: React.FC<BillDetailsModalProps> = ({
           onClick={e => e.stopPropagation()}
         >
           {/* Header */}
-          <div className="px-4 py-3.5 bg-slate-900 text-white flex items-center justify-between">
+          <div className={`px-4 py-3.5 text-white flex items-center justify-between ${
+            isCancelled ? 'bg-rose-950' : 'bg-slate-900'
+          }`}>
             <div>
               <div className="flex items-center space-x-2">
                 <span className="font-extrabold text-base tracking-wide font-mono">
-                  {sale.bill_number}
+                  {currentSale.bill_number}
                 </span>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
-                  sale.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40' :
-                  sale.status === 'exchanged' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/40' :
-                  sale.status === 'partially_exchanged' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' :
-                  'bg-rose-500/20 text-rose-400 border border-rose-500/40'
+                  isCancelled ? 'bg-rose-600 text-white' :
+                  currentSale.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40' :
+                  currentSale.status === 'exchanged' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/40' :
+                  'bg-amber-500/20 text-amber-400 border border-amber-500/40'
                 }`}>
-                  {sale.status.replace('_', ' ')}
+                  {currentSale.status.replace('_', ' ')}
                 </span>
               </div>
               <div className="text-xs text-slate-400 mt-0.5">
-                Billed on {formatDateTimeIST(sale.created_at)} by {sale.created_by}
+                Billed on {formatDateTimeIST(currentSale.created_at)} by {currentSale.created_by}
               </div>
             </div>
             <button onClick={onClose} className="p-1 rounded-full text-slate-400 hover:text-white">
@@ -79,52 +90,70 @@ export const BillDetailsModal: React.FC<BillDetailsModalProps> = ({
             </button>
           </div>
 
-          {/* 7-Day Exchange Status Header Strip */}
-          <div className={`px-4 py-2 flex items-center justify-between text-xs font-semibold ${
-            eligibility.isEligible ? eligibility.badgeColor : 'bg-rose-50 text-rose-800'
-          }`}>
-            <div className="flex items-center space-x-1.5">
-              {eligibility.isEligible ? <ShieldCheck className="w-4 h-4" /> : <ShieldAlert className="w-4 h-4 text-rose-600" />}
-              <span>{eligibility.reason}</span>
+          {/* Cancelled Banner if cancelled */}
+          {isCancelled ? (
+            <div className="p-3 bg-rose-50 border-b border-rose-200 text-rose-900 text-xs flex items-start space-x-2">
+              <Ban className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              <div>
+                <div className="font-black text-rose-950">THIS BILL HAS BEEN CANCELLED</div>
+                <div className="text-[11px] mt-0.5">
+                  Reason: <span className="font-semibold italic">"{currentSale.cancellation_reason || 'Cancelled by staff'}"</span>
+                </div>
+                <div className="text-[10px] text-rose-700 mt-0.5 font-mono">
+                  Cancelled by {currentSale.cancelled_by || 'Staff'} • Stock was restored to inventory.
+                </div>
+              </div>
             </div>
-            <div className="text-[11px] font-mono">
-              Policy: 7 Days
+          ) : (
+            /* 7-Day Exchange Status Header Strip */
+            <div className={`px-4 py-2 flex items-center justify-between text-xs font-semibold ${
+              eligibility.isEligible ? eligibility.badgeColor : 'bg-rose-50 text-rose-800'
+            }`}>
+              <div className="flex items-center space-x-1.5">
+                {eligibility.isEligible ? <ShieldCheck className="w-4 h-4" /> : <ShieldAlert className="w-4 h-4 text-rose-600" />}
+                <span>{eligibility.reason}</span>
+              </div>
+              <div className="text-[11px] font-mono">
+                Policy: 7 Days
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Body Content */}
           <div className="p-4 overflow-y-auto space-y-4 text-xs">
             
             {/* Customer Details if available */}
-            {(sale.customer_name || sale.customer_phone) && (
+            {(currentSale.customer_name || currentSale.customer_phone) && (
               <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
                 <div className="flex items-center space-x-2">
                   <User className="w-4 h-4 text-slate-400" />
                   <div>
-                    <div className="font-bold text-slate-900">{sale.customer_name || 'Customer'}</div>
-                    {sale.customer_phone && (
-                      <div className="text-slate-500 font-mono text-[11px]">{sale.customer_phone}</div>
+                    <div className="font-bold text-slate-900">{currentSale.customer_name || 'Customer'}</div>
+                    {currentSale.customer_phone && (
+                      <div className="text-slate-500 font-mono text-[11px]">{currentSale.customer_phone}</div>
                     )}
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => openWhatsAppShare(sale)}
-                  className="px-2.5 py-1 bg-emerald-600 text-white rounded-lg font-bold text-[11px] flex items-center space-x-1 shadow-xs"
-                >
-                  <MessageCircle className="w-3.5 h-3.5" />
-                  <span>Send Bill</span>
-                </button>
+                {!isCancelled && (
+                  <button
+                    type="button"
+                    onClick={() => openWhatsAppShare(currentSale)}
+                    className="px-2.5 py-1 bg-emerald-600 text-white rounded-lg font-bold text-[11px] flex items-center space-x-1 shadow-xs"
+                  >
+                    <MessageCircle className="w-3.5 h-3.5" />
+                    <span>Send Bill</span>
+                  </button>
+                )}
               </div>
             )}
 
             {/* Itemized Table */}
             <div>
               <div className="font-bold text-slate-700 uppercase tracking-wider text-[11px] mb-1.5">
-                Purchased Items ({sale.items?.length || 0})
+                Purchased Items ({currentSale.items?.length || 0})
               </div>
               <div className="border border-slate-200 rounded-xl divide-y bg-slate-50 overflow-hidden">
-                {sale.items?.map((item, idx) => (
+                {currentSale.items?.map((item, idx) => (
                   <div key={item.id} className="p-3 flex items-center justify-between">
                     <div>
                       <div className="font-bold text-slate-900 text-xs">
@@ -151,30 +180,30 @@ export const BillDetailsModal: React.FC<BillDetailsModalProps> = ({
             <div className="p-3 bg-slate-100 rounded-xl space-y-1 text-slate-700">
               <div className="flex justify-between">
                 <span>Subtotal:</span>
-                <span className="font-bold">{formatCurrency(sale.subtotal)}</span>
+                <span className="font-bold">{formatCurrency(currentSale.subtotal)}</span>
               </div>
-              {sale.discount_amount > 0 && (
+              {currentSale.discount_amount > 0 && (
                 <div className="flex justify-between text-rose-600 font-semibold">
-                  <span>Discount ({sale.discount_type}):</span>
-                  <span>- {formatCurrency(sale.discount_amount)}</span>
+                  <span>Discount ({currentSale.discount_type}):</span>
+                  <span>- {formatCurrency(currentSale.discount_amount)}</span>
                 </div>
               )}
               <div className="flex justify-between text-slate-900 font-black text-sm pt-1 border-t border-slate-200">
                 <span>Grand Total:</span>
-                <span className="font-mono text-amber-600">{formatCurrency(sale.grand_total)}</span>
+                <span className="font-mono text-amber-600">{formatCurrency(currentSale.grand_total)}</span>
               </div>
               <div className="flex justify-between text-[11px] text-slate-500 pt-1">
                 <span>Payment Mode:</span>
-                <span className="font-bold uppercase text-slate-800">{sale.payment_method} ({sale.payment_status})</span>
+                <span className="font-bold uppercase text-slate-800">{currentSale.payment_method} ({currentSale.payment_status})</span>
               </div>
               <div className="flex justify-between text-[11px] text-slate-500">
                 <span>Paid Amount:</span>
-                <span className="font-bold text-slate-800">{formatCurrency(sale.paid_amount)}</span>
+                <span className="font-bold text-slate-800">{formatCurrency(currentSale.paid_amount)}</span>
               </div>
-              {sale.balance_amount > 0 && (
+              {currentSale.balance_amount > 0 && (
                 <div className="flex justify-between text-rose-700 font-bold">
                   <span>Balance Due:</span>
-                  <span>{formatCurrency(sale.balance_amount)}</span>
+                  <span>{formatCurrency(currentSale.balance_amount)}</span>
                 </div>
               )}
             </div>
@@ -192,8 +221,11 @@ export const BillDetailsModal: React.FC<BillDetailsModalProps> = ({
 
               <button
                 type="button"
-                onClick={() => openWhatsAppShare(sale)}
-                className="py-2.5 px-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl flex items-center justify-center space-x-1 shadow-xs"
+                disabled={isCancelled}
+                onClick={() => openWhatsAppShare(currentSale)}
+                className={`py-2.5 px-2 font-bold rounded-xl flex items-center justify-center space-x-1 shadow-xs ${
+                  isCancelled ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                }`}
               >
                 <MessageCircle className="w-3.5 h-3.5" />
                 <span>WhatsApp</span>
@@ -210,28 +242,53 @@ export const BillDetailsModal: React.FC<BillDetailsModalProps> = ({
               </button>
             </div>
 
+            {/* EDIT & CANCEL BILL BUTTONS (CLEARLY VISIBLE ACTIONS) */}
+            {!isCancelled && (
+              <div className="pt-2 border-t border-slate-200 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEditModal(true)}
+                  className="py-2.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-900 font-bold rounded-xl flex items-center justify-center space-x-1.5 border border-slate-300 shadow-2xs"
+                >
+                  <Edit3 className="w-4 h-4 text-slate-700" />
+                  <span>Edit Bill</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowCancelModal(true)}
+                  className="py-2.5 px-3 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 font-bold rounded-xl flex items-center justify-center space-x-1.5 shadow-2xs"
+                >
+                  <Ban className="w-4 h-4 text-rose-600" />
+                  <span>Cancel Bill</span>
+                </button>
+              </div>
+            )}
+
             {/* EXCHANGE ACTION BUTTON (STRICT 7-DAY LOGIC) */}
-            <div className="pt-2 border-t border-slate-200">
-              <button
-                type="button"
-                disabled={!eligibility.isEligible || sale.status === 'exchanged'}
-                onClick={() => setShowExchangeModal(true)}
-                className={`w-full py-3 px-4 rounded-xl font-black tracking-wide text-xs flex items-center justify-center space-x-2 shadow-md transition ${
-                  !eligibility.isEligible || sale.status === 'exchanged'
-                    ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                    : 'bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950'
-                }`}
-              >
-                <RotateCcw className="w-4 h-4 stroke-[2.5]" />
-                <span>
-                  {sale.status === 'exchanged'
-                    ? 'BILL FULLY EXCHANGED'
-                    : !eligibility.isEligible
-                    ? 'EXCHANGE EXPIRED (EXCEEDED 7 DAYS)'
-                    : 'PROCESS CLOTHING EXCHANGE (7 DAYS)'}
-                </span>
-              </button>
-            </div>
+            {!isCancelled && (
+              <div className="pt-1">
+                <button
+                  type="button"
+                  disabled={!eligibility.isEligible || currentSale.status === 'exchanged'}
+                  onClick={() => setShowExchangeModal(true)}
+                  className={`w-full py-3 px-4 rounded-xl font-black tracking-wide text-xs flex items-center justify-center space-x-2 shadow-md transition ${
+                    !eligibility.isEligible || currentSale.status === 'exchanged'
+                      ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                      : 'bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950'
+                  }`}
+                >
+                  <RotateCcw className="w-4 h-4 stroke-[2.5]" />
+                  <span>
+                    {currentSale.status === 'exchanged'
+                      ? 'BILL FULLY EXCHANGED'
+                      : !eligibility.isEligible
+                      ? 'EXCHANGE EXPIRED (EXCEEDED 7 DAYS)'
+                      : 'PROCESS CLOTHING EXCHANGE (7 DAYS)'}
+                  </span>
+                </button>
+              </div>
+            )}
 
           </div>
         </div>
@@ -240,11 +297,35 @@ export const BillDetailsModal: React.FC<BillDetailsModalProps> = ({
       {/* Exchange Flow Modal */}
       {showExchangeModal && (
         <ExchangeModal
-          sale={sale}
+          sale={currentSale}
           onClose={() => setShowExchangeModal(false)}
           onExchangeComplete={() => {
             onRefreshHistory();
             onClose();
+          }}
+        />
+      )}
+
+      {/* Cancel Bill Modal */}
+      {showCancelModal && (
+        <CancelBillModal
+          sale={currentSale}
+          onClose={() => setShowCancelModal(false)}
+          onSuccess={(cancelled) => {
+            setCurrentSale(cancelled);
+            onRefreshHistory();
+          }}
+        />
+      )}
+
+      {/* Edit Bill Modal */}
+      {showEditModal && (
+        <EditBillModal
+          sale={currentSale}
+          onClose={() => setShowEditModal(false)}
+          onSuccess={(updated) => {
+            setCurrentSale(updated);
+            onRefreshHistory();
           }}
         />
       )}

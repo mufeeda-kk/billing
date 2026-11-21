@@ -55,10 +55,11 @@ export const BillHistoryPage: React.FC = () => {
     return () => window.removeEventListener('vcs_store_update', handleUpdate);
   }, [loadSales]);
 
-  // Quick summary stats for current view
+  // Quick summary stats for current view (excluding cancelled bills)
   const summary = useMemo(() => {
-    const totalAmount = sales.reduce((sum, s) => sum + s.grand_total, 0);
-    const totalBills = sales.length;
+    const activeBills = sales.filter(s => s.status !== 'cancelled');
+    const totalAmount = activeBills.reduce((sum, s) => sum + s.grand_total, 0);
+    const totalBills = activeBills.length;
     return { totalAmount, totalBills };
   }, [sales]);
 
@@ -163,14 +164,19 @@ export const BillHistoryPage: React.FC = () => {
           </div>
         ) : (
           sales.map(sale => {
-            const eligibility = checkExchangeEligibility(sale.created_at);
+            const isCancelled = sale.status === 'cancelled';
+            const eligibility = checkExchangeEligibility(sale.created_at, isCancelled);
             const totalItems = sale.items?.reduce((sum, i) => sum + i.quantity, 0) || 0;
 
             return (
               <div
                 key={sale.id}
                 onClick={() => setSelectedSale(sale)}
-                className="bg-white border border-slate-200 hover:border-slate-300 rounded-xl p-3.5 cursor-pointer shadow-xs active:scale-[0.99] transition flex flex-col space-y-2"
+                className={`bg-white border rounded-xl p-3.5 cursor-pointer shadow-xs active:scale-[0.99] transition flex flex-col space-y-2 ${
+                  isCancelled 
+                    ? 'border-rose-200 bg-rose-50/30 hover:border-rose-300' 
+                    : 'border-slate-200 hover:border-slate-300'
+                }`}
               >
                 {/* Top: Bill #, Status Badge, Time */}
                 <div className="flex items-center justify-between">
@@ -179,10 +185,10 @@ export const BillHistoryPage: React.FC = () => {
                       {sale.bill_number}
                     </span>
                     <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded uppercase ${
+                      isCancelled ? 'bg-rose-600 text-white font-black' :
                       sale.status === 'completed' ? 'bg-emerald-100 text-emerald-800' :
                       sale.status === 'exchanged' ? 'bg-blue-100 text-blue-800' :
-                      sale.status === 'partially_exchanged' ? 'bg-amber-100 text-amber-800' :
-                      'bg-rose-100 text-rose-800'
+                      'bg-amber-100 text-amber-800'
                     }`}>
                       {sale.status.replace('_', ' ')}
                     </span>
@@ -210,10 +216,21 @@ export const BillHistoryPage: React.FC = () => {
                   </div>
                 </div>
 
+                {/* If Cancelled: Show cancellation reason */}
+                {isCancelled && sale.cancellation_reason && (
+                  <div className="text-[11px] text-rose-700 bg-rose-100/60 p-1.5 rounded-lg italic">
+                    Reason: "{sale.cancellation_reason}"
+                  </div>
+                )}
+
                 {/* Bottom: 7-Day Exchange eligibility badge & Grand Total */}
                 <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
                   <div className="flex items-center space-x-1">
-                    {eligibility.isEligible ? (
+                    {isCancelled ? (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">
+                        Cancelled (Stock Restored)
+                      </span>
+                    ) : eligibility.isEligible ? (
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${eligibility.badgeColor}`}>
                         Exchange: {eligibility.daysRemaining}d left
                       </span>
@@ -228,7 +245,9 @@ export const BillHistoryPage: React.FC = () => {
                   </div>
 
                   <div className="flex items-center space-x-1">
-                    <span className="font-black text-sm text-slate-900 font-mono">
+                    <span className={`font-black text-sm font-mono ${
+                      isCancelled ? 'line-through text-slate-400' : 'text-slate-900'
+                    }`}>
                       {formatCurrency(sale.grand_total)}
                     </span>
                     <ChevronRight className="w-4 h-4 text-slate-400" />
