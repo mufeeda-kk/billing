@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Sale } from '../types';
 import { db } from '../lib/db';
+import { useStore } from '../context/StoreContext';
 import { checkExchangeEligibility, formatCurrency, formatDateTimeIST } from '../lib/date';
 import { BillDetailsModal } from '../components/history/BillDetailsModal';
 import { PrintReceiptContainer } from '../components/billing/PrintReceiptContainer';
@@ -18,6 +19,7 @@ import {
 } from 'lucide-react';
 
 export const BillHistoryPage: React.FC = () => {
+  const { isSupabaseLive } = useStore();
   const [sales, setSales] = useState<Sale[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -159,8 +161,14 @@ export const BillHistoryPage: React.FC = () => {
         ) : sales.length === 0 ? (
           <div className="text-center py-16 text-slate-500">
             <Receipt className="w-10 h-10 mx-auto text-slate-400 mb-2 stroke-[1.5]" />
-            <p className="font-bold text-sm">No bills found</p>
-            <p className="text-xs text-slate-400 mt-0.5">Try changing the date filter or search query</p>
+            <p className="font-bold text-sm">
+              {!isSupabaseLive ? 'Cloud Database Not Connected' : 'No bills found'}
+            </p>
+            <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto">
+              {!isSupabaseLive
+                ? 'Configure Supabase in Settings so all 3 phones share sales & receipts live.'
+                : 'Try changing the date filter or create a new bill in Billing.'}
+            </p>
           </div>
         ) : (
           sales.map(sale => {

@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 
 export const BillingPage: React.FC = () => {
-  const { products, isLoadingProducts, showToast } = useStore();
+  const { products, isLoadingProducts, showToast, isSupabaseLive } = useStore();
   const { 
     items, 
     addSimpleProductToCart, 
@@ -117,8 +117,14 @@ export const BillingPage: React.FC = () => {
         ) : filteredProducts.length === 0 ? (
           <div className="text-center py-16 text-slate-500">
             <Layers className="w-10 h-10 mx-auto text-slate-400 mb-2 stroke-[1.5]" />
-            <p className="font-bold text-sm">No products found</p>
-            <p className="text-xs text-slate-400 mt-0.5">Try searching with a different keyword</p>
+            <p className="font-bold text-sm">
+              {!isSupabaseLive ? 'Cloud Database Not Connected' : 'No products found'}
+            </p>
+            <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto">
+              {!isSupabaseLive 
+                ? 'Configure your Supabase database in Settings to share live inventory across all 3 staff phones.'
+                : searchQuery ? 'Try searching with a different keyword' : 'Add products in Inventory to start billing'}
+            </p>
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2.5 sm:gap-3">

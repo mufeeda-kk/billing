@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 
 export const InventoryPage: React.FC = () => {
-  const { refreshProducts: refreshStoreProducts, lowStockCount } = useStore();
+  const { refreshProducts: refreshStoreProducts, lowStockCount, isSupabaseLive } = useStore();
 
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -182,7 +182,14 @@ export const InventoryPage: React.FC = () => {
         ) : filteredProducts.length === 0 ? (
           <div className="text-center py-16 text-slate-500">
             <Boxes className="w-10 h-10 mx-auto text-slate-400 mb-2 stroke-[1.5]" />
-            <p className="font-bold text-sm">No products found</p>
+            <p className="font-bold text-sm">
+              {!isSupabaseLive ? 'Cloud Database Not Connected' : 'No products found'}
+            </p>
+            <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto">
+              {!isSupabaseLive
+                ? 'Configure Supabase in Settings to synchronize live inventory across all 3 staff phones.'
+                : 'Tap "+ Add Product" above to create a new product.'}
+            </p>
           </div>
         ) : (
           filteredProducts.map(product => {

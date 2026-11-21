@@ -62,6 +62,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setLowStockCount(lowCount);
     } catch (e) {
       console.error('Error fetching products:', e);
+      setProducts([]);
     } finally {
       setIsLoadingProducts(false);
       isRefreshingRef.current = false;
@@ -213,13 +214,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setConnectionStatus('offline');
     }
 
-    // 4. Reliable Polling Fallback (Heartbeat every 12 seconds when online)
+    // 4. Reliable Polling Fallback (Heartbeat every 8 seconds when online)
     const heartbeatInterval = setInterval(() => {
       if (typeof navigator !== 'undefined' && navigator.onLine) {
         refreshProducts();
         window.dispatchEvent(new CustomEvent('vcs_store_update', { detail: { type: 'HEARTBEAT_POLL' } }));
       }
-    }, 12000);
+    }, 8000);
 
     // 5. Re-sync when switching back to the app window/tab
     const handleVisibilityChange = () => {
