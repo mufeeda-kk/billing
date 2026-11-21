@@ -28,6 +28,8 @@ export const BillSuccessModal: React.FC<BillSuccessModalProps> = ({
   const [targetPhone, setTargetPhone] = useState(sale.customer_phone || '');
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
+  const [pdfError, setPdfError] = useState<string | null>(null);
+
   // Fast WhatsApp sharing (ZERO lag, does not wait for PDF!)
   const handleWhatsAppShare = () => {
     openWhatsAppShare(sale, targetPhone);
@@ -38,16 +40,15 @@ export const BillSuccessModal: React.FC<BillSuccessModalProps> = ({
     triggerReceiptPrint();
   };
 
-  // PDF Download / Native mobile share
-  const handlePdf = async () => {
+  // Direct PDF Download
+  const handlePdfDownload = async () => {
     setIsGeneratingPdf(true);
+    setPdfError(null);
     try {
-      const shared = await sharePdfNative(sale);
-      if (!shared) {
-        await generateAndDownloadBillPdf(sale);
-      }
-    } catch (e) {
+      await generateAndDownloadBillPdf(sale);
+    } catch (e: any) {
       console.error('PDF error:', e);
+      setPdfError(e?.message || 'Could not download PDF. Please check browser permissions.');
     } finally {
       setIsGeneratingPdf(false);
     }
@@ -121,12 +122,18 @@ export const BillSuccessModal: React.FC<BillSuccessModalProps> = ({
           <button
             type="button"
             disabled={isGeneratingPdf}
-            onClick={handlePdf}
-            className="w-full py-2.5 px-4 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-800 font-bold text-xs flex items-center justify-center space-x-2"
+            onClick={handlePdfDownload}
+            className="w-full py-2.5 px-4 rounded-xl border border-slate-300 hover:bg-slate-50 active:bg-slate-100 text-slate-800 font-bold text-xs flex items-center justify-center space-x-2 transition"
           >
             <Download className="w-4 h-4 text-slate-600" />
-            <span>{isGeneratingPdf ? 'Generating PDF...' : 'Download PDF Invoice'}</span>
+            <span>{isGeneratingPdf ? 'Downloading PDF...' : 'Download PDF Invoice'}</span>
           </button>
+
+          {pdfError && (
+            <div className="p-2 bg-rose-50 border border-rose-200 rounded-lg text-rose-800 text-[11px] text-center font-medium">
+              {pdfError}
+            </div>
+          )}
 
           {/* 4. NEW BILL (Dismiss & Start Next) */}
           <div className="pt-2 border-t border-slate-100">

@@ -25,36 +25,36 @@ export const MoreMenuModal: React.FC<MoreMenuModalProps> = ({
   const menuItems = [
     {
       id: 'purchases',
-      label: 'Stock Purchase Entry',
-      desc: 'Receive new clothing stock into inventory',
+      label: 'Purchases',
+      desc: 'Receive new stock into inventory',
       icon: PackagePlus,
       color: 'text-emerald-600 bg-emerald-50'
     },
     {
       id: 'expenses',
-      label: 'Shop Expenses',
-      desc: 'Track daily refreshments, rent, utilities',
+      label: 'Expenses',
+      desc: 'Track daily tea, rent, utilities',
       icon: Wallet,
       color: 'text-rose-600 bg-rose-50'
     },
     {
       id: 'customers',
-      label: 'Customer Directory',
-      desc: 'View customer purchase & bill history',
+      label: 'Customers',
+      desc: 'Customer details & purchase history',
       icon: Users,
       color: 'text-blue-600 bg-blue-50'
     },
     {
       id: 'activity',
-      label: 'Staff Activity Log',
-      desc: 'Audit trail of billing & stock changes',
+      label: 'Activity Log',
+      desc: 'Staff activity & audit trail',
       icon: Activity,
       color: 'text-amber-600 bg-amber-50'
     },
     {
       id: 'settings',
-      label: 'Shop & Supabase Settings',
-      desc: 'Configure cloud database & receipt details',
+      label: 'Settings',
+      desc: 'Supabase cloud & shop settings',
       icon: Settings,
       color: 'text-slate-700 bg-slate-100'
     }

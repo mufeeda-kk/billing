@@ -4,6 +4,7 @@ import { CartItem, Product, ProductVariant, DiscountType, PaymentMethod } from '
 interface CartContextType {
   items: CartItem[];
   addToCart: (product: Product, variant: ProductVariant, qty?: number) => { success: boolean; message?: string };
+  addSimpleProductToCart: (product: Product, qty?: number) => { success: boolean; message?: string };
   updateItemQty: (cartId: string, quantity: number) => { success: boolean; message?: string };
   incrementItemQty: (cartId: string) => { success: boolean; message?: string };
   decrementItemQty: (cartId: string) => void;
@@ -15,9 +16,8 @@ interface CartContextType {
   setCustomerName: (name: string) => void;
   setCustomerPhone: (phone: string) => void;
 
-  discountType: DiscountType;
-  discountValue: number;
-  setDiscount: (type: DiscountType, value: number) => void;
+  discountAmount: number;
+  setDirectDiscount: (amount: number) => void;
 
   paymentMethod: PaymentMethod;
   setPaymentMethod: (method: PaymentMethod) => void;
@@ -30,7 +30,6 @@ interface CartContextType {
 
   // Computed calculations
   subtotal: number;
-  discountAmount: number;
   grandTotal: number;
   paidAmount: number;
   balanceAmount: number;
@@ -43,8 +42,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [items, setItems] = useState<CartItem[]>([]);
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
-  const [discountType, setDiscountType] = useState<DiscountType>('none');
-  const [discountValue, setDiscountValue] = useState<number>(0);
+  const [directDiscountInput, setDirectDiscountInput] = useState<number>(0);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [paidAmountInput, setPaidAmountInput] = useState('');
   const [notes, setNotes] = useState('');
@@ -58,17 +56,16 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return items.reduce((sum, item) => sum + item.quantity, 0);
   }, [items]);
 
+  // Discount cannot exceed subtotal and defaults to 0
   const discountAmount = useMemo(() => {
-    if (discountType === 'none' || discountValue <= 0 || subtotal <= 0) return 0;
-    if (discountType === 'percentage') {
-      const pct = Math.min(100, Math.max(0, discountValue));
-      return Math.round((subtotal * pct) / 100);
-    }
-    if (discountType === 'fixed') {
-      return Math.min(subtotal, Math.max(0, discountValue));
-    }
-    return 0;
-  }, [discountType, discountValue, subtotal]);
+    if (directDiscountInput <= 0 || subtotal <= 0) return 0;
+    return Math.min(subtotal, Math.max(0, directDiscountInput));
+  }, [directDiscountInput, subtotal]);
+
+  const setDirectDiscount = (amount: number) => {
+    const val = isNaN(amount) ? 0 : Math.max(0, amount);
+    setDirectDiscountInput(val);
+  };
 
   const grandTotal = useMemo(() => {
     return Math.max(0, subtotal - discountAmount);
@@ -92,7 +89,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (targetQty > variant.stock_quantity) {
       return { 
         success: false, 
-        message: `Only ${variant.stock_quantity} available in stock for ${product.name} (${variant.size}/${variant.color}).` 
+        message: `Only ${variant.stock_quantity} available in stock for ${product.name}.` 
       };
     }
 
@@ -116,8 +113,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         product_name: product.name,
         sku: product.sku,
         variant_sku: variant.variant_sku,
-        size: variant.size,
-        color: variant.color,
+        size: variant.size || 'Regular',
+        color: variant.color || 'Standard',
         quantity: qty,
         unit_price: product.selling_price,
         purchase_price: product.purchase_price || 0,
@@ -128,6 +125,26 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setItems(prev => [...prev, newItem]);
     }
     return { success: true };
+  };
+
+  // Direct 1-tap add for simple billing (no size/color modals)
+  const addSimpleProductToCart = (product: Product, qty = 1): { success: boolean; message?: string } => {
+    const availableVariant = product.variants?.find(v => v.stock_quantity > 0) || product.variants?.[0] || {
+      id: `var-${product.id}`,
+      product_id: product.id,
+      variant_sku: `${product.sku || 'SKU'}-STD`,
+      size: 'Regular',
+      color: 'Standard',
+      stock_quantity: product.total_stock ?? 0,
+      low_stock_threshold: 5
+    };
+
+    const totalAvailable = product.total_stock ?? availableVariant.stock_quantity;
+    if (totalAvailable <= 0) {
+      return { success: false, message: `"${product.name}" is out of stock.` };
+    }
+
+    return addToCart(product, availableVariant, qty);
   };
 
   const updateItemQty = (cartId: string, quantity: number): { success: boolean; message?: string } => {
@@ -142,7 +159,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (quantity > item.available_stock) {
       return { 
         success: false, 
-        message: `Only ${item.available_stock} in stock for ${item.product_name} (${item.size}/${item.color})` 
+        message: `Only ${item.available_stock} available in stock for ${item.product_name}.` 
       };
     }
 
@@ -156,12 +173,13 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       return i;
     }));
+
     return { success: true };
   };
 
   const incrementItemQty = (cartId: string): { success: boolean; message?: string } => {
     const item = items.find(i => i.cart_id === cartId);
-    if (!item) return { success: false };
+    if (!item) return { success: false, message: 'Item not found' };
     return updateItemQty(cartId, item.quantity + 1);
   };
 
@@ -183,22 +201,16 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setItems([]);
     setCustomerName('');
     setCustomerPhone('');
-    setDiscountType('none');
-    setDiscountValue(0);
-    setPaymentMethod('cash');
+    setDirectDiscountInput(0);
     setPaidAmountInput('');
     setNotes('');
-  };
-
-  const setDiscount = (type: DiscountType, value: number) => {
-    setDiscountType(type);
-    setDiscountValue(Math.max(0, value));
   };
 
   return (
     <CartContext.Provider value={{
       items,
       addToCart,
+      addSimpleProductToCart,
       updateItemQty,
       incrementItemQty,
       decrementItemQty,
@@ -208,9 +220,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       customerPhone,
       setCustomerName,
       setCustomerPhone,
-      discountType,
-      discountValue,
-      setDiscount,
+      discountAmount,
+      setDirectDiscount,
       paymentMethod,
       setPaymentMethod,
       paidAmountInput,
@@ -218,7 +229,6 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       notes,
       setNotes,
       subtotal,
-      discountAmount,
       grandTotal,
       paidAmount,
       balanceAmount,
@@ -229,8 +239,10 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 };
 
-export const useCart = () => {
-  const ctx = useContext(CartContext);
-  if (!ctx) throw new Error('useCart must be used within a CartProvider');
-  return ctx;
+export const useCart = (): CartContextType => {
+  const context = useContext(CartContext);
+  if (!context) {
+    throw new Error('useCart must be used within a CartProvider');
+  }
+  return context;
 };

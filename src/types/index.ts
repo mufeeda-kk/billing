@@ -49,6 +49,7 @@ export interface Product {
   updated_at?: string;
   variants?: ProductVariant[];
   total_stock?: number;
+  low_stock_threshold?: number;
 }
 
 export interface CartItem {

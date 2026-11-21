@@ -21,7 +21,7 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({ onOpenCart, activeTab, setActiveTab }) => {
   const { currentUser, allStaff, switchUser } = useAuth();
-  const { isOnline, isSupabaseLive, lowStockCount } = useStore();
+  const { isOnline, isSupabaseLive, connectionStatus, lowStockCount } = useStore();
   const { totalQuantity } = useCart();
   const [showUserDropdown, setShowUserDropdown] = useState(false);
 
@@ -55,17 +55,32 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenCart, activeTab, setActive
         <div className="flex items-center space-x-2">
           
           {/* Realtime Sync Status Pill */}
-          <div 
-            title={isSupabaseLive ? 'Connected to Cloud Supabase' : 'Running in Shared Realtime Offline Mode'}
-            className={`hidden xs:flex items-center space-x-1 px-2 py-1 rounded-full text-[11px] font-medium border ${
-              isSupabaseLive 
-                ? 'bg-emerald-950/80 border-emerald-600 text-emerald-300' 
-                : 'bg-amber-950/80 border-amber-600 text-amber-300'
+          <button 
+            type="button"
+            onClick={() => setActiveTab('settings')}
+            title={
+              connectionStatus === 'connected' ? 'Connected to Supabase Cloud' :
+              connectionStatus === 'syncing' ? 'Syncing with Supabase Cloud...' :
+              'Offline / Supabase not connected. Click to open Settings.'
+            }
+            className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border transition ${
+              connectionStatus === 'connected'
+                ? 'bg-emerald-950/90 border-emerald-500 text-emerald-300'
+                : connectionStatus === 'syncing'
+                ? 'bg-amber-950/90 border-amber-500 text-amber-300 animate-pulse'
+                : 'bg-rose-950/90 border-rose-500 text-rose-300'
             }`}
           >
-            {isOnline ? <Wifi className="w-3 h-3 text-emerald-400 animate-pulse" /> : <WifiOff className="w-3 h-3 text-rose-400" />}
-            <span className="hidden sm:inline">{isSupabaseLive ? 'Cloud Sync' : 'Live Sync'}</span>
-          </div>
+            <span className={`w-2 h-2 rounded-full ${
+              connectionStatus === 'connected' ? 'bg-emerald-400' :
+              connectionStatus === 'syncing' ? 'bg-amber-400 animate-ping' :
+              'bg-rose-400'
+            }`} />
+            <span>
+              {connectionStatus === 'connected' ? 'Connected' :
+               connectionStatus === 'syncing' ? 'Syncing...' : 'Offline'}
+            </span>
+          </button>
 
           {/* Staff Switcher Dropdown */}
           <div className="relative">

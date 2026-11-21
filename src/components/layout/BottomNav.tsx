@@ -28,7 +28,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab, o
     },
     {
       id: 'history',
-      label: 'History',
+      label: 'Bills',
       icon: Receipt,
       badge: null
     },

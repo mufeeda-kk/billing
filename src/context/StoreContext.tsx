@@ -1,7 +1,9 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { Product, Sale } from '../types';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { Product } from '../types';
 import { db } from '../lib/db';
 import { isSupabaseConfigured, getSupabase } from '../lib/supabase';
+
+export type ConnectionStatus = 'connected' | 'syncing' | 'offline';
 
 interface StoreContextType {
   products: Product[];
@@ -11,6 +13,7 @@ interface StoreContextType {
   recentSalesCount: number;
   isOnline: boolean;
   isSupabaseLive: boolean;
+  connectionStatus: ConnectionStatus;
   notificationMessage: string | null;
   showToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
 }
@@ -24,7 +27,15 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [recentSalesCount, setRecentSalesCount] = useState(0);
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [isSupabaseLive, setIsSupabaseLive] = useState(isSupabaseConfigured());
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(
+    typeof navigator !== 'undefined' && !navigator.onLine 
+      ? 'offline' 
+      : isSupabaseConfigured() ? 'syncing' : 'offline'
+  );
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  const debounceTimerRef = useRef<any>(null);
+  const isRefreshingRef = useRef(false);
 
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToast({ message, type });
@@ -34,91 +45,207 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   const refreshProducts = useCallback(async () => {
+    if (isRefreshingRef.current) return;
+    isRefreshingRef.current = true;
     try {
       const list = await db.getProducts();
       setProducts(list);
       // Count variants where stock is <= threshold
       let lowCount = 0;
       list.forEach(p => {
-        p.variants?.forEach(v => {
-          if (v.stock_quantity <= (v.low_stock_threshold || 2)) {
-            lowCount++;
-          }
-        });
+        const total = p.total_stock ?? 0;
+        const thresh = p.variants?.[0]?.low_stock_threshold || 5;
+        if (total <= thresh) {
+          lowCount++;
+        }
       });
       setLowStockCount(lowCount);
     } catch (e) {
       console.error('Error fetching products:', e);
     } finally {
       setIsLoadingProducts(false);
+      isRefreshingRef.current = false;
     }
   }, []);
+
+  // Debounced refresh helper so bursts of realtime events trigger a single reload
+  const triggerDebouncedRefresh = useCallback(() => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    debounceTimerRef.current = setTimeout(() => {
+      refreshProducts();
+      // Notify other parts of the app (BillHistory, Inventory, Reports)
+      window.dispatchEvent(new CustomEvent('vcs_store_update', { detail: { type: 'LIVE_SYNC' } }));
+    }, 250);
+  }, [refreshProducts]);
 
   useEffect(() => {
     refreshProducts();
 
-    // Listen to online / offline network state
-    const handleOnline = () => { setIsOnline(true); showToast('Back online', 'success'); };
-    const handleOffline = () => { setIsOnline(false); showToast('Operating in offline mode', 'info'); };
+    // 1. Online / Offline network listeners
+    const handleOnline = () => { 
+      setIsOnline(true);
+      setConnectionStatus(isSupabaseConfigured() ? 'connected' : 'offline');
+      showToast('Network restored', 'success'); 
+      triggerDebouncedRefresh();
+    };
+    const handleOffline = () => { 
+      setIsOnline(false);
+      setConnectionStatus('offline');
+      showToast('Offline mode', 'info'); 
+    };
+
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    // Realtime listener for cross-tab and cross-device sync
+    // 2. Custom DOM update listener for internal broadcasts
     const handleCustomUpdate = (e: any) => {
       const detail = e.detail;
       if (detail?.type === 'BILL_CREATED') {
-        refreshProducts();
+        triggerDebouncedRefresh();
         setRecentSalesCount(prev => prev + 1);
-        showToast(`New Bill Created: #${detail.data?.bill_number}`, 'success');
-      } else if (detail?.type === 'STOCK_UPDATE' || detail?.type === 'PRODUCT_UPDATE' || detail?.type === 'EXCHANGE_PROCESSED') {
-        refreshProducts();
+        if (detail.data?.bill_number) {
+          showToast(`Bill Created: #${detail.data.bill_number}`, 'success');
+        }
+      } else if (
+        detail?.type === 'STOCK_UPDATE' || 
+        detail?.type === 'PRODUCT_UPDATE' || 
+        detail?.type === 'BILL_CANCELLED' || 
+        detail?.type === 'BILL_EDITED' ||
+        detail?.type === 'EXCHANGE_PROCESSED'
+      ) {
+        triggerDebouncedRefresh();
       }
     };
     window.addEventListener('vcs_store_update', handleCustomUpdate);
 
-    // Setup Supabase Realtime Channel if configured
+    // 3. Setup Supabase Realtime Multi-User Subscriptions across all tables
     let supabaseChannel: any = null;
     const supabase = getSupabase();
+
     if (supabase && isSupabaseConfigured()) {
+      setConnectionStatus('syncing');
       try {
         supabaseChannel = supabase
-          .channel('schema-db-changes')
+          .channel('vcs-shared-cloud-sync')
+          // Products table
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'products' },
+            (payload) => {
+              if (payload.eventType === 'INSERT') {
+                showToast(`New product added: ${(payload.new as any).name || ''}`, 'info');
+              }
+              triggerDebouncedRefresh();
+            }
+          )
+          // Product variants (stock changes)
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'product_variants' },
+            () => {
+              triggerDebouncedRefresh();
+            }
+          )
+          // Sales (bills created, edited, or cancelled)
           .on(
             'postgres_changes',
             { event: '*', schema: 'public', table: 'sales' },
             (payload) => {
               if (payload.eventType === 'INSERT') {
-                showToast(`Live: New bill created #${payload.new.bill_number}`, 'success');
+                showToast(`Live Bill Created: #${(payload.new as any).bill_number || ''}`, 'success');
+                setRecentSalesCount(prev => prev + 1);
+              } else if (payload.eventType === 'UPDATE') {
+                const updated = payload.new as any;
+                if (updated.status === 'cancelled') {
+                  showToast(`Live: Bill #${updated.bill_number} was cancelled`, 'info');
+                }
               }
-              refreshProducts();
+              triggerDebouncedRefresh();
             }
           )
+          // Sale items
           .on(
             'postgres_changes',
-            { event: '*', schema: 'public', table: 'product_variants' },
+            { event: '*', schema: 'public', table: 'sale_items' },
             () => {
-              refreshProducts();
+              triggerDebouncedRefresh();
+            }
+          )
+          // Purchases
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'purchases' },
+            () => {
+              triggerDebouncedRefresh();
+            }
+          )
+          // Expenses
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'expenses' },
+            () => {
+              window.dispatchEvent(new CustomEvent('vcs_store_update', { detail: { type: 'EXPENSES_SYNC' } }));
+            }
+          )
+          // Exchanges
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'exchanges' },
+            () => {
+              triggerDebouncedRefresh();
             }
           )
           .subscribe((status) => {
             if (status === 'SUBSCRIBED') {
               setIsSupabaseLive(true);
+              setConnectionStatus('connected');
+            } else if (status === 'TIMED_OUT' || status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+              setConnectionStatus('syncing');
             }
           });
       } catch (err) {
-        console.warn('Realtime subscription error:', err);
+        console.warn('Realtime subscription setup failed:', err);
+        setConnectionStatus('syncing');
       }
+    } else {
+      setConnectionStatus('offline');
     }
+
+    // 4. Reliable Polling Fallback (Heartbeat every 12 seconds when online)
+    const heartbeatInterval = setInterval(() => {
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        refreshProducts();
+        window.dispatchEvent(new CustomEvent('vcs_store_update', { detail: { type: 'HEARTBEAT_POLL' } }));
+      }
+    }, 12000);
+
+    // 5. Re-sync when switching back to the app window/tab
+    const handleVisibilityChange = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        refreshProducts();
+        window.dispatchEvent(new CustomEvent('vcs_store_update', { detail: { type: 'VISIBILITY_FOCUS' } }));
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleVisibilityChange);
 
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
       window.removeEventListener('vcs_store_update', handleCustomUpdate);
-      if (supabaseChannel) {
-        supabase?.removeChannel(supabaseChannel);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleVisibilityChange);
+      clearInterval(heartbeatInterval);
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+      if (supabaseChannel && supabase) {
+        supabase.removeChannel(supabaseChannel);
       }
     };
-  }, [refreshProducts, showToast]);
+  }, [refreshProducts, triggerDebouncedRefresh, showToast]);
 
   return (
     <StoreContext.Provider value={{
@@ -129,6 +256,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       recentSalesCount,
       isOnline,
       isSupabaseLive,
+      connectionStatus,
       notificationMessage: toast?.message || null,
       showToast
     }}>
@@ -150,8 +278,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   );
 };
 
-export const useStore = () => {
-  const ctx = useContext(StoreContext);
-  if (!ctx) throw new Error('useStore must be used within a StoreProvider');
-  return ctx;
+export const useStore = (): StoreContextType => {
+  const context = useContext(StoreContext);
+  if (!context) {
+    throw new Error('useStore must be used within a StoreProvider');
+  }
+  return context;
 };

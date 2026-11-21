@@ -40,14 +40,19 @@ export const BillDetailsModal: React.FC<BillDetailsModalProps> = ({
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
   const isCancelled = currentSale.status === 'cancelled';
   const eligibility = checkExchangeEligibility(currentSale.created_at, isCancelled);
 
   const handlePdf = async () => {
     setIsDownloadingPdf(true);
+    setPdfError(null);
     try {
       await generateAndDownloadBillPdf(currentSale);
+    } catch (err: any) {
+      console.error('PDF generation error:', err);
+      setPdfError(err?.message || 'Failed to download PDF invoice.');
     } finally {
       setIsDownloadingPdf(false);
     }
@@ -241,6 +246,12 @@ export const BillDetailsModal: React.FC<BillDetailsModalProps> = ({
                 <span>{isDownloadingPdf ? '...' : 'PDF'}</span>
               </button>
             </div>
+
+            {pdfError && (
+              <div className="p-2 bg-rose-50 border border-rose-200 rounded-lg text-rose-800 text-[11px] text-center font-medium">
+                {pdfError}
+              </div>
+            )}
 
             {/* EDIT & CANCEL BILL BUTTONS (CLEARLY VISIBLE ACTIONS) */}
             {!isCancelled && (

@@ -242,43 +242,61 @@ export const InventoryPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Variants Breakdown Table */}
-                <div className="border border-slate-100 rounded-xl overflow-hidden divide-y bg-slate-50 text-xs">
-                  {product.variants?.map(variant => {
-                    const isLow = variant.stock_quantity <= (variant.low_stock_threshold || 2);
-                    const isOut = variant.stock_quantity <= 0;
+                {/* Stock Details: Simplified for single stock, detailed for legacy multi-variants */}
+                {product.variants && product.variants.length === 1 ? (
+                  <div className="p-2.5 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-between text-xs">
+                    <div className="flex items-center space-x-2">
+                      <span className="font-semibold text-slate-600">Stock Quantity:</span>
+                      <span className={`font-mono font-bold ${
+                        totalStock <= 0 ? 'text-rose-600' : totalStock <= 5 ? 'text-amber-600' : 'text-slate-900'
+                      }`}>
+                        {totalStock} available
+                      </span>
+                    </div>
 
-                    return (
-                      <div key={variant.id} className="p-2.5 flex items-center justify-between">
-                        <div className="flex items-center space-x-2">
-                          <span className="font-black bg-white px-2 py-0.5 rounded border border-slate-200 text-slate-900 font-mono">
-                            {variant.size}
-                          </span>
-                          <span className="font-semibold text-slate-700">{variant.color}</span>
-                          <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">
-                            (SKU: {variant.variant_sku})
-                          </span>
+                    <button
+                      onClick={() => setAdjustingTarget({ product, variant: product.variants![0] })}
+                      className="px-2.5 py-1 bg-white hover:bg-slate-100 active:bg-slate-200 border border-slate-200 rounded-lg font-bold text-[11px] text-slate-700 flex items-center space-x-1 shadow-2xs"
+                    >
+                      <Sliders className="w-3 h-3 text-slate-500" />
+                      <span>Adjust Stock</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="border border-slate-100 rounded-xl overflow-hidden divide-y bg-slate-50 text-xs">
+                    {product.variants?.map(variant => {
+                      const isLow = variant.stock_quantity <= (variant.low_stock_threshold || 2);
+                      const isOut = variant.stock_quantity <= 0;
+
+                      return (
+                        <div key={variant.id} className="p-2.5 flex items-center justify-between">
+                          <div className="flex items-center space-x-2">
+                            <span className="font-black bg-white px-2 py-0.5 rounded border border-slate-200 text-slate-900 font-mono">
+                              {variant.size}
+                            </span>
+                            <span className="font-semibold text-slate-700">{variant.color}</span>
+                          </div>
+
+                          <div className="flex items-center space-x-3">
+                            <span className={`font-mono font-bold ${
+                              isOut ? 'text-rose-600' : isLow ? 'text-amber-600' : 'text-slate-900'
+                            }`}>
+                              {isOut ? 'Out of stock' : `${variant.stock_quantity} pcs`}
+                            </span>
+
+                            <button
+                              onClick={() => setAdjustingTarget({ product, variant })}
+                              className="px-2 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-md font-bold text-[11px] text-slate-700 flex items-center space-x-1"
+                            >
+                              <Sliders className="w-3 h-3 text-slate-500" />
+                              <span>Adjust</span>
+                            </button>
+                          </div>
                         </div>
-
-                        <div className="flex items-center space-x-3">
-                          <span className={`font-mono font-bold ${
-                            isOut ? 'text-rose-600' : isLow ? 'text-amber-600' : 'text-slate-900'
-                          }`}>
-                            {isOut ? 'Out of stock' : `${variant.stock_quantity} pcs`}
-                          </span>
-
-                          <button
-                            onClick={() => setAdjustingTarget({ product, variant })}
-                            className="px-2 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-md font-bold text-[11px] text-slate-700 flex items-center space-x-1"
-                          >
-                            <Sliders className="w-3 h-3 text-slate-500" />
-                            <span>Adjust</span>
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             );
           })

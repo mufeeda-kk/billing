@@ -1,28 +1,32 @@
 import React, { useState, useMemo } from 'react';
 import { useStore } from '../context/StoreContext';
 import { useCart } from '../context/CartContext';
-import { Product, ProductVariant, Sale } from '../types';
-import { VariantSelectorModal } from '../components/billing/VariantSelectorModal';
+import { Product, Sale } from '../types';
 import { CartDrawer } from '../components/billing/CartDrawer';
 import { BillSuccessModal } from '../components/billing/BillSuccessModal';
 import { PrintReceiptContainer } from '../components/billing/PrintReceiptContainer';
 import { formatCurrency } from '../lib/date';
 import { 
   Search, 
-  ShoppingBag, 
   Layers, 
-  Sparkles, 
   ArrowRight,
-  Plus
+  Plus,
+  Minus
 } from 'lucide-react';
 
 export const BillingPage: React.FC = () => {
-  const { products, isLoadingProducts } = useStore();
-  const { items, addToCart, grandTotal, totalQuantity } = useCart();
+  const { products, isLoadingProducts, showToast } = useStore();
+  const { 
+    items, 
+    addSimpleProductToCart, 
+    incrementItemQty, 
+    decrementItemQty, 
+    grandTotal, 
+    totalQuantity 
+  } = useCart();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
-  const [activeProductForVariant, setActiveProductForVariant] = useState<Product | null>(null);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [completedSale, setCompletedSale] = useState<Sale | null>(null);
 
@@ -42,29 +46,36 @@ export const BillingPage: React.FC = () => {
       const q = searchQuery.toLowerCase().trim();
       result = result.filter(p => 
         p.name.toLowerCase().includes(q) ||
-        p.sku.toLowerCase().includes(q) ||
-        p.brand?.toLowerCase().includes(q) ||
-        p.variants?.some(v => v.size.toLowerCase().includes(q) || v.color.toLowerCase().includes(q) || v.variant_sku.toLowerCase().includes(q))
+        p.category_name.toLowerCase().includes(q) ||
+        p.sku?.toLowerCase().includes(q)
       );
     }
     return result;
   }, [products, selectedCategory, searchQuery]);
 
+  const handleAddProduct = (product: Product) => {
+    const res = addSimpleProductToCart(product, 1);
+    if (!res.success && res.message) {
+      showToast(res.message, 'error');
+    }
+  };
+
   return (
-    <div className="pb-24 pt-2 max-w-7xl mx-auto px-3 sm:px-4">
+    <div className="pb-28 pt-2 max-w-7xl mx-auto px-3 sm:px-4">
       {/* 1. Fast Search Bar */}
       <div className="sticky top-14 z-30 bg-slate-100/95 backdrop-blur-xs py-2">
         <div className="relative">
           <Search className="w-4 h-4 absolute left-3.5 top-3.5 text-slate-400" />
           <input
             type="text"
-            placeholder="Search product by name, SKU or size..."
+            placeholder="Search product by name or category..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             className="w-full pl-10 pr-10 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-medium placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500 shadow-xs"
           />
           {searchQuery && (
             <button 
+              type="button"
               onClick={() => setSearchQuery('')}
               className="absolute right-3 top-3 text-xs text-slate-400 hover:text-slate-600 bg-slate-100 rounded-full w-5 h-5 flex items-center justify-center font-bold"
             >
@@ -114,23 +125,26 @@ export const BillingPage: React.FC = () => {
             {filteredProducts.map(product => {
               const totalStock = product.total_stock ?? 0;
               const isOutOfStock = totalStock <= 0;
-              const variantCount = product.variants?.length || 0;
+              
+              // Find if this product is currently in cart
+              const cartItem = items.find(i => i.product_id === product.id);
+              const inCartQty = cartItem ? cartItem.quantity : 0;
 
               return (
                 <div
                   key={product.id}
-                  onClick={() => setActiveProductForVariant(product)}
-                  className={`bg-white rounded-xl border p-3 flex flex-col justify-between cursor-pointer select-none transition-all shadow-xs hover:shadow-md active:scale-[0.98] ${
+                  className={`bg-white rounded-xl border p-3 flex flex-col justify-between select-none transition-all shadow-xs ${
                     isOutOfStock 
                       ? 'border-slate-200 opacity-60' 
+                      : inCartQty > 0
+                      ? 'border-amber-400 bg-amber-50/20 shadow-xs'
                       : 'border-slate-200 hover:border-amber-400'
                   }`}
                 >
                   <div>
-                    {/* Category & SKU */}
-                    <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono mb-1">
-                      <span className="truncate max-w-[90px]">{product.category_name}</span>
-                      <span>{product.sku}</span>
+                    {/* Category */}
+                    <div className="text-[10px] text-slate-400 font-semibold truncate mb-1">
+                      {product.category_name}
                     </div>
 
                     {/* Product Title */}
@@ -146,24 +160,50 @@ export const BillingPage: React.FC = () => {
                         {formatCurrency(product.selling_price)}
                       </div>
                       <div className={`text-[10px] font-semibold ${
-                        isOutOfStock ? 'text-rose-600' : totalStock <= 3 ? 'text-amber-600' : 'text-emerald-700'
+                        isOutOfStock ? 'text-rose-600' : totalStock <= 5 ? 'text-amber-600' : 'text-emerald-700'
                       }`}>
-                        {isOutOfStock ? 'Out of Stock' : `${totalStock} in stock`}
+                        {isOutOfStock ? 'Out of stock' : `${totalStock} in stock`}
                       </div>
                     </div>
 
-                    {/* Quick Add Button / Variant pill */}
-                    <button
-                      type="button"
-                      disabled={isOutOfStock}
-                      className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs shadow-xs ${
-                        isOutOfStock 
-                          ? 'bg-slate-200 text-slate-400' 
-                          : 'bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950'
-                      }`}
-                    >
-                      <Plus className="w-4 h-4 stroke-[2.5]" />
-                    </button>
+                    {/* PRIORITY 3: DIRECT 1-TAP ADD / ADJUST BUTTONS */}
+                    {isOutOfStock ? (
+                      <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-2 py-1 rounded-md">
+                        Sold out
+                      </span>
+                    ) : inCartQty > 0 ? (
+                      <div className="flex items-center space-x-1 bg-amber-500 text-slate-950 rounded-lg p-0.5 shadow-xs">
+                        <button
+                          type="button"
+                          onClick={() => decrementItemQty(cartItem!.cart_id)}
+                          className="w-6 h-6 rounded flex items-center justify-center hover:bg-amber-600 active:bg-amber-700 font-bold"
+                        >
+                          <Minus className="w-3.5 h-3.5" />
+                        </button>
+                        <span className="w-4 text-center font-black text-xs font-mono">
+                          {inCartQty}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const res = incrementItemQty(cartItem!.cart_id);
+                            if (!res.success && res.message) showToast(res.message, 'error');
+                          }}
+                          className="w-6 h-6 rounded flex items-center justify-center hover:bg-amber-600 active:bg-amber-700 font-bold"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleAddProduct(product)}
+                        className="py-1.5 px-3 rounded-lg bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-black text-xs flex items-center space-x-1 shadow-xs transition select-none"
+                      >
+                        <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                        <span>Add</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -176,6 +216,7 @@ export const BillingPage: React.FC = () => {
       {totalQuantity > 0 && (
         <div className="fixed bottom-16 left-0 right-0 z-40 p-3 max-w-lg mx-auto animate-slide-up">
           <button
+            type="button"
             onClick={() => setIsCartOpen(true)}
             className="w-full bg-slate-900 text-white rounded-2xl p-3.5 shadow-2xl flex items-center justify-between border border-slate-700 active:scale-[0.99] transition"
           >
@@ -192,20 +233,11 @@ export const BillingPage: React.FC = () => {
             </div>
 
             <div className="flex items-center space-x-1.5 font-bold text-xs text-white bg-slate-800 px-3 py-2 rounded-xl">
-              <span>CHECKOUT</span>
+              <span>VIEW BILL</span>
               <ArrowRight className="w-4 h-4 text-amber-400" />
             </div>
           </button>
         </div>
-      )}
-
-      {/* Variant Selector Modal */}
-      {activeProductForVariant && (
-        <VariantSelectorModal
-          product={activeProductForVariant}
-          onClose={() => setActiveProductForVariant(null)}
-          onAddToCart={addToCart}
-        />
       )}
 
       {/* Cart Drawer */}

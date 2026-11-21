@@ -306,6 +306,139 @@ export const db = {
     }));
   },
 
+  async saveSimpleProduct(
+    productData: {
+      id?: string;
+      name: string;
+      category_name: string;
+      selling_price: number;
+      purchase_price?: number;
+      total_stock: number;
+      low_stock_threshold?: number;
+      is_active?: boolean;
+    },
+    staffName: string
+  ): Promise<Product> {
+    const isEdit = Boolean(productData.id);
+    const id = productData.id || `prod-${Date.now()}`;
+    const sku = `VCS-${Math.floor(1000 + Math.random() * 9000)}`;
+    const supabase = getSupabase();
+
+    if (supabase && isSupabaseConfigured()) {
+      try {
+        let prodId = productData.id;
+        if (isEdit && prodId) {
+          // Update product
+          await supabase.from('products').update({
+            name: productData.name,
+            category_name: productData.category_name,
+            selling_price: productData.selling_price,
+            purchase_price: productData.purchase_price || 0,
+            is_active: productData.is_active ?? true,
+            updated_at: new Date().toISOString()
+          }).eq('id', prodId);
+
+          // Update primary variant
+          const { data: existingVars } = await supabase
+            .from('product_variants')
+            .select('*')
+            .eq('product_id', prodId);
+
+          if (existingVars && existingVars.length > 0) {
+            const primaryVar = existingVars[0];
+            await supabase.from('product_variants').update({
+              stock_quantity: productData.total_stock,
+              low_stock_threshold: productData.low_stock_threshold || 5,
+              updated_at: new Date().toISOString()
+            }).eq('id', primaryVar.id);
+          } else {
+            await supabase.from('product_variants').insert({
+              product_id: prodId,
+              variant_sku: `${sku}-STD`,
+              size: 'Regular',
+              color: 'Standard',
+              stock_quantity: productData.total_stock,
+              low_stock_threshold: productData.low_stock_threshold || 5
+            });
+          }
+        } else {
+          // Insert new product
+          const { data: newProd, error: prodErr } = await supabase.from('products').insert({
+            name: productData.name,
+            sku: sku,
+            category_name: productData.category_name || 'General',
+            brand: 'VINTAGE',
+            purchase_price: productData.purchase_price || 0,
+            selling_price: productData.selling_price,
+            is_active: true,
+            is_archived: false
+          }).select().single();
+
+          if (!prodErr && newProd) {
+            prodId = newProd.id;
+            await supabase.from('product_variants').insert({
+              product_id: prodId,
+              variant_sku: `${sku}-STD`,
+              size: 'Regular',
+              color: 'Standard',
+              stock_quantity: productData.total_stock,
+              low_stock_threshold: productData.low_stock_threshold || 5
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('Supabase saveSimpleProduct failed, writing locally:', err);
+      }
+    }
+
+    // Local state & cache update
+    const existingIdx = localProducts.findIndex(p => p.id === id);
+    const existingProd = existingIdx >= 0 ? localProducts[existingIdx] : null;
+
+    const variantId = existingProd?.variants?.[0]?.id || `var-${id}-0`;
+    const defaultVariant: ProductVariant = {
+      id: variantId,
+      product_id: id,
+      variant_sku: existingProd?.variants?.[0]?.variant_sku || `${sku}-STD`,
+      size: existingProd?.variants?.[0]?.size || 'Regular',
+      color: existingProd?.variants?.[0]?.color || 'Standard',
+      stock_quantity: Math.max(0, productData.total_stock),
+      low_stock_threshold: productData.low_stock_threshold || 5
+    };
+
+    const savedProd: Product = {
+      id,
+      name: productData.name,
+      sku: existingProd?.sku || sku,
+      category_name: productData.category_name || 'General',
+      brand: existingProd?.brand || 'VINTAGE',
+      purchase_price: productData.purchase_price || 0,
+      selling_price: productData.selling_price,
+      is_active: productData.is_active ?? true,
+      is_archived: false,
+      variants: [defaultVariant],
+      total_stock: productData.total_stock
+    };
+
+    if (existingIdx >= 0) {
+      localProducts[existingIdx] = savedProd;
+    } else {
+      localProducts.unshift(savedProd);
+    }
+    saveStored(STORAGE_KEYS.PRODUCTS, localProducts);
+
+    await this.logActivity(
+      isEdit ? 'PRODUCT_EDITED' : 'PRODUCT_ADDED',
+      `${isEdit ? 'Updated' : 'Added'} product "${savedProd.name}" (Stock: ${savedProd.total_stock}, Price: ₹${savedProd.selling_price})`,
+      'product',
+      id,
+      staffName
+    );
+
+    notifyChange('PRODUCT_UPDATE', savedProd);
+    return savedProd;
+  },
+
   async saveProduct(
     productData: Partial<Product>, 
     variantsData: Partial<ProductVariant>[], 
@@ -703,6 +836,43 @@ export const db = {
 
         if (rpcError) {
           console.warn('Supabase process_sale_transaction RPC error, falling back locally:', rpcError.message);
+        } else if (rpcResult && rpcResult.sale_id) {
+          // Fetch canonical recorded sale from Supabase
+          const { data: dbSale } = await supabase
+            .from('sales')
+            .select('*, items:sale_items(*)')
+            .eq('id', rpcResult.sale_id)
+            .single();
+
+          if (dbSale) {
+            localSales.unshift(dbSale);
+            saveStored(STORAGE_KEYS.SALES, localSales);
+
+            // Deduct local stock in memory
+            for (const item of saleData.items) {
+              for (const p of localProducts) {
+                const v = p.variants?.find(v => v.id === item.variant_id);
+                if (v) {
+                  v.stock_quantity = Math.max(0, v.stock_quantity - item.quantity);
+                  break;
+                }
+              }
+            }
+            saveStored(STORAGE_KEYS.PRODUCTS, localProducts);
+
+            // Log activity
+            await this.logActivity(
+              'BILL_CREATED',
+              `Created Bill #${dbSale.bill_number} for ₹${dbSale.grand_total} (${dbSale.payment_method.toUpperCase()})`,
+              'sales',
+              dbSale.id,
+              saleData.created_by,
+              { bill_number: dbSale.bill_number, total: dbSale.grand_total }
+            );
+
+            notifyChange('BILL_CREATED', dbSale);
+            return dbSale;
+          }
         }
       } catch (err) {
         console.warn('Supabase call failed:', err);
