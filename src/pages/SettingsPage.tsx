@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { SHOP_INFO } from '../types';
 import { useStore } from '../context/StoreContext';
+import { useAuth } from '../context/AuthContext';
 import { 
   getStoredSupabaseConfig, 
   saveStoredSupabaseConfig, 
@@ -17,11 +18,15 @@ import {
   PhoneCall, 
   Store,
   Wifi,
-  Sparkles
+  Sparkles,
+  Smartphone,
+  ShieldCheck,
+  RefreshCw
 } from 'lucide-react';
 
 export const SettingsPage: React.FC = () => {
   const { isSupabaseLive, showToast } = useStore();
+  const { isDeviceAuthorized, deviceSlot, deviceName, refreshDeviceStatus } = useAuth();
   const currentConfig = getStoredSupabaseConfig();
 
   const [supabaseUrl, setSupabaseUrl] = useState(currentConfig.url);
@@ -50,7 +55,7 @@ export const SettingsPage: React.FC = () => {
   };
 
   const handleCopySqlInstructions = () => {
-    const sqlPath = 'supabase/migrations/20261121_initial_schema.sql';
+    const sqlPath = 'supabase/migrations/20261122_master_cloud_billing_schema.sql';
     navigator.clipboard.writeText(`-- Run schema file located in: ${sqlPath}`);
     setCopiedSql(true);
     showToast('SQL migration file path copied to clipboard', 'info');
@@ -64,7 +69,48 @@ export const SettingsPage: React.FC = () => {
         <h1 className="font-black text-base sm:text-lg tracking-wide text-slate-900">
           SHOP & SYSTEM SETTINGS
         </h1>
-        <p className="text-xs text-slate-500">Configure Cloud Supabase, Shop Information, & Printing</p>
+        <p className="text-xs text-slate-500">Configure Cloud Supabase, 3-Phone Sync & Shop Info</p>
+      </div>
+
+      {/* 0. Authorized Device Status Card */}
+      <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-xs space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2 text-slate-900 font-bold text-sm">
+            <Smartphone className="w-4 h-4 text-amber-500" />
+            <span>Store Device Authorization</span>
+          </div>
+          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+            isDeviceAuthorized ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+          }`}>
+            {isDeviceAuthorized ? '🟢 Authorized Phone' : '⚠️ Unenrolled Phone'}
+          </span>
+        </div>
+
+        <div className="flex items-center justify-between bg-slate-50 p-3 rounded-xl border border-slate-100 text-xs">
+          <div>
+            <div className="font-bold text-slate-900 flex items-center space-x-1.5">
+              <span>{deviceName}</span>
+              {deviceSlot && (
+                <span className="text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded font-mono">
+                  Slot #{deviceSlot}
+                </span>
+              )}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-0.5">
+              {isDeviceAuthorized 
+                ? 'Persistent session active. Bypasses all logins directly into Billing.'
+                : 'This phone is not enrolled into the 3-device limit yet.'}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={refreshDeviceStatus}
+            className="p-2 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-200 transition"
+            title="Recheck Device Status"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
       {/* 1. Shop Information Card */}

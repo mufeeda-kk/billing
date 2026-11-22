@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { StoreProvider } from './context/StoreContext';
 import { CartProvider } from './context/CartContext';
+import { isSupabaseConfigured } from './lib/supabase';
 import { Navbar } from './components/layout/Navbar';
 import { BottomNav } from './components/layout/BottomNav';
 import { MoreMenuModal } from './components/layout/MoreMenuModal';
 import { CartDrawer } from './components/billing/CartDrawer';
 import { BillSuccessModal } from './components/billing/BillSuccessModal';
 import { PrintReceiptContainer } from './components/billing/PrintReceiptContainer';
+import { DeviceEnrollmentModal } from './components/auth/DeviceEnrollmentModal';
 import { Sale } from './types';
 
 // Pages
@@ -22,10 +24,14 @@ import { ActivityLogPage } from './pages/ActivityLogPage';
 import { SettingsPage } from './pages/SettingsPage';
 
 const AppContent: React.FC = () => {
+  const { isDeviceAuthorized } = useAuth();
   const [activeTab, setActiveTab] = useState<string>('billing');
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
   const [isGlobalCartOpen, setIsGlobalCartOpen] = useState(false);
   const [globalCompletedSale, setGlobalCompletedSale] = useState<Sale | null>(null);
+
+  // If cloud database is configured and device is not yet authorized, show the one-time enrollment modal
+  const showEnrollmentGate = isSupabaseConfigured() && !isDeviceAuthorized;
 
   const renderActivePage = () => {
     switch (activeTab) {
@@ -54,6 +60,9 @@ const AppContent: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-100 text-slate-900 selection:bg-amber-500 selection:text-white">
+      {/* One-time Device Authorization Gate (Only appears on initial setup of a fresh unenrolled phone) */}
+      {showEnrollmentGate && <DeviceEnrollmentModal />}
+
       {/* Top Mobile-First Navbar */}
       <Navbar
         activeTab={activeTab}

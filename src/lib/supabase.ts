@@ -3,6 +3,30 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 const STORAGE_URL_KEY = 'vcs_supabase_url';
 const STORAGE_ANON_KEY = 'vcs_supabase_anon_key';
 
+// Automatically purge legacy localStorage databases on module load
+export function clearLegacyLocalStorage(): void {
+  if (typeof window === 'undefined') return;
+  const legacyKeys = [
+    'vcs_products_db',
+    'vcs_sales_db',
+    'vcs_purchases_db',
+    'vcs_expenses_db',
+    'vcs_customers_db',
+    'vcs_activity_db',
+    'vcs_exchanges_db'
+  ];
+  legacyKeys.forEach(k => {
+    try {
+      localStorage.removeItem(k);
+    } catch {
+      // ignore
+    }
+  });
+}
+
+// Run legacy storage purge immediately
+clearLegacyLocalStorage();
+
 export function getStoredSupabaseConfig(): { url: string; anonKey: string } {
   const envUrl = ((import.meta as any).env?.VITE_SUPABASE_URL || '').trim();
   const envKey = ((import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '').trim();
@@ -10,7 +34,7 @@ export function getStoredSupabaseConfig(): { url: string; anonKey: string } {
   const storedUrl = typeof window !== 'undefined' ? (localStorage.getItem(STORAGE_URL_KEY) || '').trim() : '';
   const storedKey = typeof window !== 'undefined' ? (localStorage.getItem(STORAGE_ANON_KEY) || '').trim() : '';
 
-  // If env variables are provided and valid, prioritize them so all phones on the same server automatically sync
+  // If env variables are provided and valid, prioritize them so all phones automatically sync
   if (envUrl && envUrl.startsWith('http') && envKey && envKey.length > 20) {
     return { url: envUrl, anonKey: envKey };
   }
@@ -25,14 +49,7 @@ export function saveStoredSupabaseConfig(url: string, anonKey: string): void {
   if (typeof window !== 'undefined') {
     localStorage.setItem(STORAGE_URL_KEY, url.trim());
     localStorage.setItem(STORAGE_ANON_KEY, anonKey.trim());
-    // Clear legacy mock data keys if they exist
-    localStorage.removeItem('vcs_products_db');
-    localStorage.removeItem('vcs_sales_db');
-    localStorage.removeItem('vcs_purchases_db');
-    localStorage.removeItem('vcs_expenses_db');
-    localStorage.removeItem('vcs_customers_db');
-    localStorage.removeItem('vcs_activity_db');
-    localStorage.removeItem('vcs_exchanges_db');
+    clearLegacyLocalStorage();
     // Invalidate client instance so next call creates new
     cachedClient = null;
   }
@@ -69,6 +86,27 @@ export function getSupabase(): SupabaseClient | null {
   } catch (err) {
     console.error('Error creating Supabase client:', err);
     return null;
+  }
+}
+
+// Ensure an anonymous persistent session is established for this device
+export async function ensureAnonymousSession(): Promise<boolean> {
+  const client = getSupabase();
+  if (!client) return false;
+
+  try {
+    const { data: { session } } = await client.auth.getSession();
+    if (!session) {
+      const { error } = await client.auth.signInAnonymously();
+      if (error) {
+        console.warn('Anonymous session initialization failed:', error.message);
+        return false;
+      }
+    }
+    return true;
+  } catch (err) {
+    console.error('Error ensuring anonymous session:', err);
+    return false;
   }
 }
 

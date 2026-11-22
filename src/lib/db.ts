@@ -130,6 +130,32 @@ export const db = {
     staffName: string
   ): Promise<Product> {
     const supabase = ensureSupabase();
+
+    // 1. Try atomic stored procedure first
+    try {
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc('save_simple_product', {
+        p_id: productData.id || null,
+        p_name: productData.name.trim(),
+        p_category_name: productData.category_name.trim() || 'General',
+        p_selling_price: productData.selling_price,
+        p_purchase_price: productData.purchase_price || 0,
+        p_stock_quantity: Math.max(0, productData.total_stock),
+        p_low_stock_threshold: productData.low_stock_threshold || 5,
+        p_is_active: productData.is_active ?? true,
+        p_performed_by: staffName
+      });
+
+      if (!rpcErr && rpcRes && rpcRes.product_id) {
+        const fresh = await this.getProductById(rpcRes.product_id);
+        if (fresh) {
+          notifyChange('PRODUCT_UPDATE', fresh);
+          return fresh;
+        }
+      }
+    } catch {
+      // Fall through to direct table transaction
+    }
+
     const isEdit = Boolean(productData.id);
     const sku = `VCS-${Math.floor(1000 + Math.random() * 9000)}`;
 
@@ -462,6 +488,22 @@ export const db = {
 
   async adjustVariantStock(variantId: string, newStock: number, reason: string, staffName: string): Promise<void> {
     const supabase = ensureSupabase();
+
+    // 1. Try atomic stored procedure
+    try {
+      const { error: rpcErr } = await supabase.rpc('adjust_stock_quantity', {
+        p_variant_id: variantId,
+        p_new_quantity: Math.max(0, newStock),
+        p_reason: reason,
+        p_performed_by: staffName
+      });
+      if (!rpcErr) {
+        notifyChange('STOCK_UPDATE', { variantId, newStock });
+        return;
+      }
+    } catch {
+      // Fall through to direct table transaction
+    }
 
     const { data: vData, error: fetchErr } = await supabase
       .from('product_variants')
@@ -1336,6 +1378,33 @@ export const db = {
     }>;
   }): Promise<Purchase> {
     const supabase = ensureSupabase();
+
+    // 1. Try atomic stored procedure
+    try {
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc('record_purchase_transaction', {
+        p_invoice_number: purchaseData.invoice_number || null,
+        p_supplier_name: purchaseData.supplier_name || null,
+        p_notes: purchaseData.notes || null,
+        p_purchased_by: purchaseData.purchased_by,
+        p_items: purchaseData.items
+      });
+
+      if (!rpcErr && rpcRes && rpcRes.purchase_id) {
+        const { data: fullPurch } = await supabase
+          .from('purchases')
+          .select('*, items:purchase_items(*)')
+          .eq('id', rpcRes.purchase_id)
+          .single();
+
+        if (fullPurch) {
+          notifyChange('STOCK_UPDATE');
+          return fullPurch;
+        }
+      }
+    } catch {
+      // Fall through to direct table transaction
+    }
+
     const totalAmount = purchaseData.items.reduce((sum, i) => sum + (i.unit_cost * i.quantity), 0);
 
     const { data: newPurch, error: purchErr } = await supabase
