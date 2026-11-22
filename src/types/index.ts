@@ -9,7 +9,6 @@ export interface StaffProfile {
   email: string;
   full_name: string;
   role: StaffRole;
-  pin_code?: string;
   is_active: boolean;
   created_at: string;
 }
