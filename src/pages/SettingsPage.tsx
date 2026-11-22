@@ -247,6 +247,12 @@ export const SettingsPage: React.FC = () => {
           supabase/migrations/20261122_public_cloud_billing_schema.sql
         </div>
       </div>
+
+      {/* 4. App Version Footer */}
+      <div className="text-center pt-2 text-slate-400 text-xs">
+        <div className="font-bold text-slate-600">VINTAGE CLOTHING STORE</div>
+        <div className="text-[11px] font-mono mt-0.5">App Version: <span className="text-amber-600 font-bold">v2.0.0 (Cloud Edition)</span></div>
+      </div>
     </div>
   );
 };
