@@ -212,6 +212,30 @@ CREATE TABLE IF NOT EXISTS public.activity_logs (
 );
 
 -- ----------------------------------------------------------------------------
+-- 2B. SCHEMA REPAIR & COMPATIBILITY (Safe ALTER TABLE for Existing Databases)
+-- ----------------------------------------------------------------------------
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS category_name TEXT NOT NULL DEFAULT 'General';
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS purchase_price NUMERIC(10, 2) NOT NULL DEFAULT 0.00;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;
+
+ALTER TABLE public.product_variants ADD COLUMN IF NOT EXISTS size TEXT NOT NULL DEFAULT 'Regular';
+ALTER TABLE public.product_variants ADD COLUMN IF NOT EXISTS color TEXT NOT NULL DEFAULT 'Standard';
+ALTER TABLE public.product_variants ADD COLUMN IF NOT EXISTS low_stock_threshold INT NOT NULL DEFAULT 5;
+
+ALTER TABLE public.sales ADD COLUMN IF NOT EXISTS discount_type TEXT NOT NULL DEFAULT 'none';
+ALTER TABLE public.sales ADD COLUMN IF NOT EXISTS discount_value NUMERIC(10, 2) NOT NULL DEFAULT 0.00;
+ALTER TABLE public.sales ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(10, 2) NOT NULL DEFAULT 0.00;
+ALTER TABLE public.sales ADD COLUMN IF NOT EXISTS balance_amount NUMERIC(10, 2) NOT NULL DEFAULT 0.00;
+ALTER TABLE public.sales ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'completed';
+ALTER TABLE public.sales ADD COLUMN IF NOT EXISTS cancellation_reason TEXT;
+ALTER TABLE public.sales ADD COLUMN IF NOT EXISTS cancelled_by TEXT;
+
+ALTER TABLE public.sale_items ADD COLUMN IF NOT EXISTS purchase_price NUMERIC(10, 2) NOT NULL DEFAULT 0.00;
+ALTER TABLE public.sale_items ADD COLUMN IF NOT EXISTS returned_quantity INT NOT NULL DEFAULT 0;
+ALTER TABLE public.sale_items ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(10, 2) NOT NULL DEFAULT 0.00;
+
+-- ----------------------------------------------------------------------------
 -- 3. PERFORMANCE INDEXES
 -- ----------------------------------------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_products_search ON public.products(name, sku, category_name);
@@ -717,19 +741,39 @@ BEGIN
 END;
 $$;
 
--- Compatibility Stub (Ensures check_device_status returns success for any legacy calls)
+-- Compatibility Stubs for Obsolete Device Security Functions
+-- Overwrites all legacy auth functions so they never block or error
+CREATE OR REPLACE FUNCTION public.is_authorized_device()
+RETURNS BOOLEAN LANGUAGE plpgsql AS $$ BEGIN RETURN true; END; $$;
+
+CREATE OR REPLACE FUNCTION public.get_current_device_name()
+RETURNS TEXT LANGUAGE plpgsql AS $$ BEGIN RETURN 'Shop Terminal'; END; $$;
+
 CREATE OR REPLACE FUNCTION public.check_device_status()
-RETURNS JSONB
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
+RETURNS JSONB LANGUAGE plpgsql AS $$
 BEGIN
-    RETURN jsonb_build_object(
-        'is_authorized', true,
-        'slot', 1,
-        'device_name', 'Shop Terminal'
-    );
+    RETURN jsonb_build_object('is_authorized', true, 'slot', 1, 'device_name', 'Shop Terminal');
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.enroll_device(p_slot_number INT DEFAULT 1, p_device_name TEXT DEFAULT 'Shop Terminal', p_secret TEXT DEFAULT '')
+RETURNS JSONB LANGUAGE plpgsql AS $$
+BEGIN
+    RETURN jsonb_build_object('success', true, 'message', 'Public cloud mode active.');
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.revoke_device_slot(p_slot_number INT DEFAULT 1, p_secret TEXT DEFAULT '')
+RETURNS JSONB LANGUAGE plpgsql AS $$
+BEGIN
+    RETURN jsonb_build_object('success', true, 'message', 'Public cloud mode active.');
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.set_owner_enrollment_secret(p_new_secret TEXT DEFAULT '', p_current_secret TEXT DEFAULT NULL)
+RETURNS JSONB LANGUAGE plpgsql AS $$
+BEGIN
+    RETURN jsonb_build_object('success', true, 'message', 'Public cloud mode active.');
 END;
 $$;
 
