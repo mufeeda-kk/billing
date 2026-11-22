@@ -42,12 +42,12 @@ export function generateWhatsAppBillMessage(sale: Sale): string {
   }
 
   msg += `*Grand Total: ₹${sale.grand_total}*\n`;
+  msg += `Paid Amount: ₹${sale.paid_amount}\n`;
+  if (sale.balance_amount > 0) {
+    msg += `Balance Due: ₹${sale.balance_amount}\n`;
+  }
   msg += `Payment: *${sale.payment_method.toUpperCase()}* (${sale.payment_status.toUpperCase()})\n`;
   msg += `Billed by: ${sale.created_by}\n`;
-
-  if (sale.balance_amount > 0) {
-    msg += `⚠️ Balance Due: ₹${sale.balance_amount}\n`;
-  }
 
   msg += `--------------------------------\n`;
   msg += `ℹ️ *EXCHANGE POLICY:*\n`;

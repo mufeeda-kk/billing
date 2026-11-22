@@ -174,6 +174,22 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               triggerDebouncedRefresh();
             }
           )
+          // Stock movements
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'stock_movements' },
+            () => {
+              triggerDebouncedRefresh();
+            }
+          )
+          // Customers
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'customers' },
+            () => {
+              window.dispatchEvent(new CustomEvent('vcs_store_update', { detail: { type: 'CUSTOMERS_SYNC' } }));
+            }
+          )
           // Purchases
           .on(
             'postgres_changes',

@@ -1600,6 +1600,7 @@ export const db = {
       cardSales,
       balanceDue,
       totalExpenses,
+      cogs: estimatedCost,
       grossProfit,
       netProfit,
       topSellingProducts,

@@ -73,8 +73,8 @@ export function getSupabase(): SupabaseClient | null {
   try {
     cachedClient = createClient(url, anonKey, {
       auth: {
-        persistSession: true,
-        autoRefreshToken: true
+        persistSession: false,
+        autoRefreshToken: false
       },
       realtime: {
         params: {
@@ -89,25 +89,9 @@ export function getSupabase(): SupabaseClient | null {
   }
 }
 
-// Ensure an anonymous persistent session is established for this device
+// Ensure an anonymous persistent session (no-op in pure public mode)
 export async function ensureAnonymousSession(): Promise<boolean> {
-  const client = getSupabase();
-  if (!client) return false;
-
-  try {
-    const { data: { session } } = await client.auth.getSession();
-    if (!session) {
-      const { error } = await client.auth.signInAnonymously();
-      if (error) {
-        console.warn('Anonymous session initialization failed:', error.message);
-        return false;
-      }
-    }
-    return true;
-  } catch (err) {
-    console.error('Error ensuring anonymous session:', err);
-    return false;
-  }
+  return true;
 }
 
 export async function testSupabaseConnection(urlInput?: string, keyInput?: string): Promise<{ success: boolean; message: string }> {
