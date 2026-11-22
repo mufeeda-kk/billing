@@ -153,9 +153,23 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         {/* Cart Items List */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {errorMessage && (
-            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs flex items-center space-x-2">
-              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
-              <span>{errorMessage}</span>
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs flex flex-col space-y-1.5">
+              <div className="flex items-center space-x-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>{errorMessage}</span>
+              </div>
+              {errorMessage.toLowerCase().includes('settings') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    window.dispatchEvent(new CustomEvent('vcs_navigate_tab', { detail: 'settings' }));
+                  }}
+                  className="self-start text-[11px] font-bold text-amber-900 bg-amber-200/80 hover:bg-amber-300 px-2.5 py-1 rounded-lg transition"
+                >
+                  ➔ Open Settings to Connect Supabase
+                </button>
+              )}
             </div>
           )}
 

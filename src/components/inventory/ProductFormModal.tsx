@@ -118,9 +118,23 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-4 space-y-4 overflow-y-auto text-xs sm:text-sm">
           {errorMsg && (
-            <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 flex items-center space-x-2">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{errorMsg}</span>
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 flex flex-col space-y-2">
+              <div className="flex items-start space-x-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <span className="font-medium">{errorMsg}</span>
+              </div>
+              {errorMsg.toLowerCase().includes('settings') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    window.dispatchEvent(new CustomEvent('vcs_navigate_tab', { detail: 'settings' }));
+                  }}
+                  className="self-start text-xs font-bold text-amber-900 bg-amber-200/80 hover:bg-amber-300 px-3 py-1.5 rounded-lg transition"
+                >
+                  ➔ Go to Settings to Connect Supabase
+                </button>
+              )}
             </div>
           )}
 

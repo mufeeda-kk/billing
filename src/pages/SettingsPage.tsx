@@ -2,21 +2,64 @@ import React, { useState } from 'react';
 import { SHOP_INFO } from '../types';
 import { useStore } from '../context/StoreContext';
 import { 
+  getStoredSupabaseConfig, 
+  saveStoredSupabaseConfig, 
+  testSupabaseConnection,
+  isSupabaseConfigured
+} from '../lib/supabase';
+import { 
   Store, 
   Wifi, 
   CheckCircle2, 
+  AlertCircle, 
   Copy, 
   Check, 
   PhoneCall, 
   Clock, 
   Receipt, 
   Database,
-  Smartphone
+  Smartphone,
+  ExternalLink,
+  Save,
+  RefreshCw
 } from 'lucide-react';
 
 export const SettingsPage: React.FC = () => {
   const { isSupabaseLive, connectionStatus, showToast } = useStore();
+  const currentConfig = getStoredSupabaseConfig();
+
+  const [supabaseUrl, setSupabaseUrl] = useState(currentConfig.url);
+  const [supabaseAnonKey, setSupabaseAnonKey] = useState(currentConfig.anonKey);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [copiedSql, setCopiedSql] = useState(false);
+
+  const handleTestConnection = async () => {
+    if (!supabaseUrl.trim() || !supabaseAnonKey.trim()) {
+      setTestResult({ success: false, message: 'Please enter both Supabase URL and Anon Key.' });
+      return;
+    }
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await testSupabaseConnection(supabaseUrl, supabaseAnonKey);
+      setTestResult(res);
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const handleSaveConfig = () => {
+    if (!supabaseUrl.trim() || !supabaseAnonKey.trim()) {
+      showToast('Please enter both Supabase URL and Anon Key.', 'error');
+      return;
+    }
+    saveStoredSupabaseConfig(supabaseUrl, supabaseAnonKey);
+    showToast('Supabase cloud credentials saved! Connecting...', 'success');
+    setTimeout(() => {
+      window.location.reload();
+    }, 800);
+  };
 
   const handleCopySqlInstructions = () => {
     const sqlPath = 'supabase/migrations/20261122_public_cloud_billing_schema.sql';
@@ -26,6 +69,8 @@ export const SettingsPage: React.FC = () => {
     setTimeout(() => setCopiedSql(false), 2000);
   };
 
+  const isConnected = isSupabaseConfigured() && isSupabaseLive;
+
   return (
     <div className="pb-24 pt-2 max-w-7xl mx-auto px-3 sm:px-4 space-y-4">
       {/* Header */}
@@ -33,35 +78,102 @@ export const SettingsPage: React.FC = () => {
         <h1 className="font-black text-base sm:text-lg tracking-wide text-slate-900">
           SHOP & SYSTEM SETTINGS
         </h1>
-        <p className="text-xs text-slate-500">Shop Identity, Receipt Policy & Public Live Cloud Sync</p>
+        <p className="text-xs text-slate-500">Configure Cloud Supabase, Receipt Policy & Shop Details</p>
       </div>
 
-      {/* 1. Cloud Database Connection Status Card */}
+      {/* 1. Supabase Cloud Database Connection Card */}
       <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-2xs space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2 text-slate-900 font-bold text-sm">
             <Database className="w-4 h-4 text-emerald-600" />
-            <span>Supabase Cloud Database</span>
+            <span>Supabase Cloud Database Connection</span>
           </div>
-          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-            connectionStatus === 'connected' 
-              ? 'bg-emerald-100 text-emerald-800' 
-              : connectionStatus === 'syncing' 
-              ? 'bg-amber-100 text-amber-800 animate-pulse' 
-              : 'bg-slate-100 text-slate-600'
+          <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
+            isConnected
+              ? 'bg-emerald-100 text-emerald-800'
+              : 'bg-rose-100 text-rose-800 animate-pulse'
           }`}>
-            {connectionStatus === 'connected' ? '🟢 Public Live Sync Active' : '🟡 Connecting...'}
+            {isConnected ? '🟢 Cloud Connected' : '🔴 Disconnected'}
           </span>
         </div>
 
-        <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 text-xs space-y-1.5">
-          <div className="flex items-center space-x-2 text-slate-700 font-medium">
-            <Smartphone className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-            <span>Unlimited Multi-Device Access: All phones, tablets, and computers open directly to Billing without login or setup secrets.</span>
+        {!isConnected && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 flex items-start space-x-2">
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <div className="font-bold">Database Not Connected</div>
+              <p className="text-[11px] text-amber-800 mt-0.5">
+                To save products, create bills, and sync all phones in real-time, enter your Supabase Project URL and Public Anon Key below.
+              </p>
+            </div>
           </div>
-          <div className="flex items-center space-x-2 text-slate-700 font-medium">
-            <Wifi className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-            <span>Works across all networks: Mobile data (4G/5G), Shop Wi-Fi, Home Wi-Fi, or any internet connection.</span>
+        )}
+
+        {testResult && (
+          <div className={`p-2.5 rounded-xl text-xs flex items-center space-x-2 ${
+            testResult.success ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'
+          }`}>
+            {testResult.success ? <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" /> : <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />}
+            <span>{testResult.message}</span>
+          </div>
+        )}
+
+        <div className="space-y-3 text-xs">
+          <div>
+            <label className="font-bold text-slate-700 block mb-1">
+              Supabase Project URL <span className="text-rose-500">*</span>
+            </label>
+            <input
+              type="text"
+              placeholder="https://your-project-id.supabase.co"
+              value={supabaseUrl}
+              onChange={e => setSupabaseUrl(e.target.value)}
+              className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-mono text-xs focus:ring-2 focus:ring-amber-500 text-slate-900"
+            />
+          </div>
+
+          <div>
+            <label className="font-bold text-slate-700 block mb-1">
+              Supabase Anon / Publishable Key <span className="text-rose-500">*</span>
+            </label>
+            <input
+              type="password"
+              placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              value={supabaseAnonKey}
+              onChange={e => setSupabaseAnonKey(e.target.value)}
+              className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-mono text-xs focus:ring-2 focus:ring-amber-500 text-slate-900"
+            />
+          </div>
+
+          <div className="flex space-x-2 pt-1">
+            <button
+              type="button"
+              disabled={testing || !supabaseUrl.trim() || !supabaseAnonKey.trim()}
+              onClick={handleTestConnection}
+              className="flex-1 py-2.5 px-3 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-800 font-bold text-xs transition flex items-center justify-center space-x-1.5"
+            >
+              {testing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Wifi className="w-3.5 h-3.5 text-slate-600" />}
+              <span>{testing ? 'Testing...' : 'Test Connection'}</span>
+            </button>
+            <button
+              type="button"
+              disabled={!supabaseUrl.trim() || !supabaseAnonKey.trim()}
+              onClick={handleSaveConfig}
+              className="flex-1 py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-xs transition flex items-center justify-center space-x-1.5"
+            >
+              <Save className="w-3.5 h-3.5 text-amber-400" />
+              <span>Save & Connect</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 text-[11px] text-slate-500 space-y-1">
+          <div className="font-semibold text-slate-700">Where to find your Supabase credentials:</div>
+          <div>1. Open <span className="font-bold text-slate-800">Supabase Dashboard</span> ➔ Click your Project.</div>
+          <div>2. Go to <span className="font-bold text-slate-800">Project Settings (gear icon)</span> ➔ <span className="font-bold text-slate-800">API</span>.</div>
+          <div>3. Copy <span className="font-mono text-slate-800">Project URL</span> and <span className="font-mono text-slate-800">anon public key</span>.</div>
+          <div className="text-amber-700 font-medium pt-1">
+            Tip: You can also set <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> in Vercel Environment Variables to automatically connect every phone without typing them here.
           </div>
         </div>
       </div>

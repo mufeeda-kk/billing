@@ -122,9 +122,18 @@ export const BillingPage: React.FC = () => {
             </p>
             <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto">
               {!isSupabaseLive 
-                ? 'Configure your Supabase database in Settings to share live inventory across all 3 staff phones.'
+                ? 'Enter your Supabase URL & Key in Settings to connect your store and load shared products.'
                 : searchQuery ? 'Try searching with a different keyword' : 'Add products in Inventory to start billing'}
             </p>
+            {!isSupabaseLive && (
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('vcs_navigate_tab', { detail: 'settings' }))}
+                className="mt-3 inline-flex items-center space-x-1.5 text-xs font-bold text-slate-900 bg-amber-400 hover:bg-amber-500 px-3 py-2 rounded-xl shadow-xs transition"
+              >
+                <span>➔ Connect Database in Settings</span>
+              </button>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2.5 sm:gap-3">

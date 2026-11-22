@@ -28,6 +28,15 @@ const AppContent: React.FC = () => {
   const [isGlobalCartOpen, setIsGlobalCartOpen] = useState(false);
   const [globalCompletedSale, setGlobalCompletedSale] = useState<Sale | null>(null);
 
+  // Allow subcomponents to trigger tab switches via custom DOM events
+  React.useEffect(() => {
+    const handleNav = (e: any) => {
+      if (e.detail) setActiveTab(e.detail);
+    };
+    window.addEventListener('vcs_navigate_tab', handleNav);
+    return () => window.removeEventListener('vcs_navigate_tab', handleNav);
+  }, []);
+
   const renderActivePage = () => {
     switch (activeTab) {
       case 'billing':

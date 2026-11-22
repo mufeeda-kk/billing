@@ -187,9 +187,18 @@ export const InventoryPage: React.FC = () => {
             </p>
             <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto">
               {!isSupabaseLive
-                ? 'Configure Supabase in Settings to synchronize live inventory across all 3 staff phones.'
+                ? 'Connect Supabase in Settings to save and synchronize live inventory across all devices.'
                 : 'Tap "+ Add Product" above to create a new product.'}
             </p>
+            {!isSupabaseLive && (
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('vcs_navigate_tab', { detail: 'settings' }))}
+                className="mt-3 inline-flex items-center space-x-1.5 text-xs font-bold text-slate-900 bg-amber-400 hover:bg-amber-500 px-3 py-2 rounded-xl shadow-xs transition"
+              >
+                <span>➔ Connect Database in Settings</span>
+              </button>
+            )}
           </div>
         ) : (
           filteredProducts.map(product => {
